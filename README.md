@@ -923,5 +923,49 @@ Then we can run a few checks ...
 
 
 
+### 9. Basic routing and load balancing
+
+#### user_redirect_preference_list
+
+Specifies the list of  _"user-name:node id(ratio)"_  pairs to send  SELECT  queries to a particular backend node for a particular user connection at a specified load balance ratio. The load balance ratio specifies a value between 0 and 1. The default is 1.0.
+
+For example, by specifying "user1:1(0.5)",  Pgpool-II  will redirect 50%  SELECT  queries to the backend node of ID 1 for the connection of user  user1.
+
+You can specify multiple  _"user-name:node id(ratio)"_  pairs by separating them using comma (,).
+
+***A more simple approach to redirecting users especially in environments where the role of a node can change based on fail over scenarios, regular expressions are also accepted for user name.*** 
+
+You can use special keywords. If  **"primary"**  is specified, queries are sent to the primary node, and if  **"standby"** is specified, one of the standby nodes are selected randomly based on load balance ratio.
+
+#### user_redirect_preference_list = 'postgres:primary,reader:standby'
+
+In the following example ...
+
+    user_redirect_preference_list = 'postgres:primary,reader:standby'
+
+When the user **postgres** connects to the database via pgpool, it will be directed to the primary server.
+When the user **reader** connects to the database it will be routed to a standby server.
+
+To achieve the above, we add the changes to the pgpool.conf file and then run pcp_reload_config to load the changes.
+
+Edit **/etc/pgpool-II/pgpool.conf** and add the following to the file.
+
+        
+    # --- User routing
+    
+    user_redirect_preference_list = 'postgres:primary,reader:standby'
+
+
+Save the changes and reload the pgpool config
+
+    pcp_reload_config -h localhost -U pcpadmin
+
+If all goes well, you will see the following ..
+
+    pcp_reload_config -- Command Successful
+
 
 ### More to come as this is still work in progress. 
+
+
+
