@@ -17,6 +17,27 @@ Due to crucial differences in the authentication configurations, this guide has 
 
 While the overall goal of both documents is the same, to set up **pgpool** for load balancing and failover, the details surrounding user authentication are distinct. Following the wrong guide could lead to authentication failures and an unusable setup. Leading to frustration. Therefore, please select the appropriate file based on your planned authentication method.
 
+### PLEASE READ THIS ....
+
+It is important to note that this guide does **not** include the most robust or ideal choices for production environments, such as:
+
+-   **Advanced Health Checks**: The guide uses simple, default health checks. In a production setting, you would want to tune these to be more sophisticated and application aware.
+    
+-   **Timeouts**: The provided timeout settings are minimal. For a real world application, you would need to adjust these to your specific network and workload to avoid issues.
+    
+-   **Watchdog**: The document does not cover the use of **Watchdog**, a critical component for achieving high availability of pgpool itself by preventing it from being a single point of failure.
+    
+
+This guide is intended as a starting point. Once you have a working setup and a basic understanding, you should thoroughly review the pgpool II documentation to **tune the configuration** to meet the specific requirements and robustness needed for your application.
+
+
+
+### Lastly ...
+
 Unfortunately, I do not have an image for ARM architecture yet. That is in the works.  If you feel you have time and can modify the Docker file for a **--platform=linux/arm64 rockylinux:9** please feel free to do so and submit a PR.
+
+
+
+
 
 
