@@ -22,6 +22,8 @@ While the overall goal of both documents is the same, to set up **pgpool** for l
 It is important to note that this guide does **not** include the most robust or ideal choices for production environments, such as:
 
 -   **Advanced Health Checks**: The guide uses simple, default health checks. In a production setting, you would want to tune these to be more sophisticated and application aware.
+
+- **Connection pooling**: The settings for connection pooling are at their most basic. For optimal performance, these parameters should be carefully tuned based on your application's connection patterns and workload.
     
 -   **Timeouts**: The provided timeout settings are minimal. For a real world application, you would need to adjust these to your specific network and workload to avoid issues.
     
@@ -35,9 +37,4 @@ This guide is intended as a starting point. Once you have a working setup and a 
 ### Lastly ...
 
 Unfortunately, I do not have an image for ARM architecture yet. That is in the works.  If you feel you have time and can modify the Docker file for a **--platform=linux/arm64 rockylinux:9** please feel free to do so and submit a PR.
-
-
-
-
-
 
