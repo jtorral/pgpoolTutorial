@@ -8,12 +8,17 @@ The instructions are designed to be followed step by step using a pre configured
 
 The provided files will also include instructions on how to download the necessary Docker files so you can create the necessary image and then create the containers for the environment.
 
+Additionally, there is a file for creating the environment on bare metal server without using Docker.
+
 Due to crucial differences in the authentication configurations, this guide has been divided into two separate, but structurally similar, documents. It is vital that you choose the correct file to avoid configuration errors.
 
 **[pgpool-md5.md](https://github.com/jtorral/pgpoolTutorial/blob/main/pgpool-md5.md)**:  This file is intended for users who are configuring their system with the older, but still common, **MD5 authentication** method. It details the specific steps required to ensure proper password and user authentication between pgpool and the underlying Postgres servers using MD5.
     
 **[pgpool-scram.md](https://github.com/jtorral/pgpoolTutorial/blob/main/pgpool-scram.md)**: This file is for those using the more modern and secure **SCRAM-SHA-256 authentication**. This document outlines the unique requirements and steps necessary for this authentication protocol, including specific password generation and configuration settings that differ significantly from the MD5 process.
     
+
+**[pgpool-rocky9-md5.md](https://github.com/jtorral/pgpoolTutorial/blob/main/pgpool-rocky9-md5.md)**:  This file is intended for users who are not using the Docker approach to seeting up the environment and are installing bare metal servers for postgres and pgpool.
+
 
 While the overall goal of both documents is the same, to set up **pgpool** for load balancing and failover, the details surrounding user authentication are distinct. Following the wrong guide could lead to authentication failures and an unusable setup. Leading to frustration. Therefore, please select the appropriate file based on your planned authentication method.
 

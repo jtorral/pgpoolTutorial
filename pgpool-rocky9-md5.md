@@ -1,6 +1,12 @@
 
 # Pgpool basic setup with failover and load balancing
-## Using AES / scram-sha-256 authentication
+
+## Non docker (bare metal) with md5 authentication
+
+
+This variation of the existing documentation for the pgpool setup and tutorial, is a direct evolution of the previous Docker-based guide, but it's recontextualized for bare metal servers. While the core objective remains the same, installing and setting up Pgpool, this version will replace all container-specific instructions with methods native to the Linux operating system.
+
+The key distinction is the management of the Pgpool process itself. In a Docker environment, the container orchestrator (Docker) handles the process lifecycle, user context, and networking.  On a bare metal server, the operating system's native service manager, **systemd**, is used to control Pgpool. This guide will include the use of systemd to start and stop Pgpool as the **postgres** user.
 
 
 ### Read this if you are not a patient person
@@ -9,71 +15,205 @@ This documentation provides both in depth explanations of key Postgres and Pgpoo
 
 ### Getting started
 
-The process outlined in this documentation will guide you through the implementation of a robust Postgres database system utilizing Pgpool for both load balancing and automatic failover.
 
-To simplify the setup outlined here, I have created a custom Docker environment that comes pre packaged with Postgres 17 and many of the industry standard tools used with Postgres. The Docker files to create your local docker image can be downloaded directly from the following Git repository at
+This document provides a technical guide for implementing a highly available and load balanced Postgres system using Pgpool. The primary focus is on deploying Pgpool for **automatic failover** and **load balancing** to enhance database resilience and performance.
 
-**https://github.com/jtorral/rocky9-pg17-bundle.**
+This guide deviates from other documentation in this repository by focusing on a **bare metal** deployment rather than containerized environments like Docker. The instructions are tailored for servers running **Rocky Linux 9**, a derivative of Red Hat Enterprise Linux 9, and are intended for direct installation on the host operating system.
 
-### 1. Build the Docker image
+### Prerequisites and Assumptions
 
-To create the Docker image, clone the repository from the provided GitHub link and run the docker build command. This command builds an image tagged as **rocky9-pg17-bundle** from the Dockerfile in the local directory.
+The following technical prerequisites are assumed for the target audience of this document:
 
-    docker build -t rocky9-pg17-bundle .
+-   **Operating System:** The target servers are installed with a Red Hat 9 based operating system and are fully operational.
+    
+-   **Secure Shell (SSH):** The SSH service is installed and configured on all servers to facilitate remote access and management.
+    
+-   **SSH Key-Based Authentication:** All servers involved in the demonstration are configured for SSH key-based authentication to enable secure, password less communication between nodes. We will mention the accounts further on in the documentation.
+    
+-   **SELinux Configuration:** The Security-Enhanced Linux (SELinux) policy is configured to not interfere with the operation of Pgpool and the Postgres services. Especially ssh.
+    
+-   **Firewall Rules:** The host firewall (if runnin) is configured to allow bidirectional network traffic between the four servers essential for this demonstration.
+- 
+- **Hostname Resolution:** The **/etc/hosts** file on each server has been updated to include the IP addresses and hostnames of all servers in the environment. This is crucial for enabling seamless hostname based communication among the cluster nodes.
 
-### 2. Create the containers
+**The 4 servers involved will be pg1, pg2, pg3 and pgpool**
 
-For our environment, we will create 4 Postgres database servers and one server for Pgpool
+If you decide to use the Docker  version of the this documentation, all of the above is already  preconfigured for you.
 
-First, create a network for the containers.
-
-    docker network create pgnet
-
-
-Now, create the 4 postgres containers
-
-    docker run -p 6431:5432 --env=PGPASSWORD=postgres -v pg1-pgdata:/pgdata --hostname pg1 --network=pgnet --name=pg1 -dt rocky9-pg17-bundle
-
-    docker run -p 6432:5432 --env=PGPASSWORD=postgres -v pg2-pgdata:/pgdata --hostname pg2 --network=pgnet --name=pg2 -dt rocky9-pg17-bundle
-
-    docker run -p 6433:5432 --env=PGPASSWORD=postgres -v pg3-pgdata:/pgdata --hostname pg3 --network=pgnet --name=pg3 -dt rocky9-pg17-bundle
-
-    docker run -p 6434:5432 --env=PGPASSWORD=postgres -v pg4-pgdata:/pgdata --hostname pg4 --network=pgnet --name=pg4 -dt rocky9-pg17-bundle
+With these components in place, we can proceed with the installation and configuration steps.
 
 
 
 
-**Lastly, create the pgpool container**
+### Installing Postgres and Pgpool on all servers
 
-    docker run -p 7432:5432 -p 9999:9999 -p 9898:9898 --env=PGPASSWORD=postgres -v pgpool-pgdata:/pgdata --hostname pgpool  --network=pgnet --name=pgpool -dt rocky9-pg17-bundle
+As root, on all servers (**pg1, pg2, pg3 and pgpool** ) run the following.
 
-Just like in the Postgres containers, we map specific ports that Pgpool uses, specifically, 9898 and 9999. We will get into more details about this later.
+    dnf update -y
+    dnf install -y epel-release
+    dnf install -y https://download.postgresql.org/pub/repos/yum/reporpms/EL-9-x86_64/pgdg-redhat-repo-latest.noarch.rpm
+    dnf -qy module disable postgresql
+    dnf install -y postgresql17-server
+    dnf install -y postgresql17-contrib
+    dnf install -y https://www.pgpool.net/yum/rpms/4.6/redhat/rhel-9-x86_64/pgpool-II-release-4.6-1.noarch.rpm
+    dnf install -y pgpool-II-pg17
+    dnf install -y pgpool-II-pg17-extensions
+
+**If you get the error, "nothing provides libmemcached.so.11()(64bit)" when trying to install Pgpool ... ,  you will probably need to do the following ...**
+
+    dnf config-manager --set-enabled crb
+    dnf install libmemcached-awesome
+    dnf install -y pgpool-II-pg17
+    dnf install -y pgpool-II-pg17-extensions
+
+
+The error  indicates that a dependency is missing. Specifically, the package requires the **libmemcached.so.11** shared library, but your system can't find it in the enabled repositories. This is a common issue on RHEL-based systems like RHEL 9 when a package from one repository depends on a library that is in a different, un-enabled repository.
+
+#### Make sure the /etc/hosts file is updated with info for all servers (**pg1, pg2, pg3 and pgpool** ).
+
+#### Setup ssh for the postgres user across all servers
+
+For this documentation, I simply generate an ssh key ( id_rsa) , add the public key (id_rsa.pub) to the (authorized_keys) file and copy them to the postgres users .ssh directory on all the servers.  This is not the most secure way of doing things but it makes things easier for this documentation.  As mentioned earlier, the assumption is made that you will take care of this as part of the install.
+
+### On the pgpool server (pgpool)
+
+#### Setup a unit file for pgpool
+
+As user root
+
+    vi /etc/systemd/system/pgpool.service
+
+And add the following to the file.
+
+    [Unit]
+    Description=Pgpool-II
+    After=syslog.target network.target
+    
+    [Service]
+    
+    User=postgres
+    Group=postgres
+    
+    EnvironmentFile=-/etc/sysconfig/pgpool
+    
+    ExecStart=/usr/bin/pgpool -f /etc/pgpool-II/pgpool.conf $OPTS
+    ExecStop=/usr/bin/pgpool -f /etc/pgpool-II/pgpool.conf $STOP_OPTS stop
+    ExecReload=/usr/bin/pgpool -f /etc/pgpool-II/pgpool.conf reload
+    
+    [Install]
+    WantedBy=multi-user.target
+
+Now reload the daemon
+
+    systemctl daemon-reload
+
+One more thing ... 
+
+    cp /usr/lib/tmpfiles.d/pgpool-II-pg17.conf /etc/tmpfiles.d
+
+Now, lets set proper ownership where needed.
+
+    cd /etc/
+    chown -R postgres:postgres pgpool-II/
+    
+    cd /var/run
+    chown -R postgres:postgres pgpool
+
+
+
+
+
 
 ### 3. Prepare the Postgres servers
 
-To streamline the setup, the Docker containers come pre configured with the Postgres database server and SSH enabled. This configuration provides the postgres user with passwordless connections between all containers, which is necessary for their communication and a requirement for some of the features we will use from Pgpool in our tutorial.
 
-***Let me say right from the beginning, one of the most challenging aspects of Pgpool is understanding the authentication process between user, client, server, admin and anything else that interacts with Pgpool. Let me just say, it is a nightmare until you understand what is actually happening. There is no consistency to the way Pgpool uses authentication.***
+### On the pg1 database server (pg1)
 
-Keep in mind, the containers used here are packaged with a variety of available Postgres tools. Therefore, we will need to make some slight modifications to meet the requirements of Pgpool.
 
-**Lets log into the pg1 container.**
-
-    docker exec -it pg1 /bin/bash
-
-Then su to postgres
+At this point Postgres should already be installed on all the servers.
 
     su - postgres
 
-Make sure your environment is set just in case something went wrong with the container build.
+Then ...
 
-    echo $PGDATA
+    cd /var/lib/pgsql/17/data
 
-Should generate the following
+Create the file **pg_custom.conf**
 
-    /pgdata/17/data
+vi pg_custom.conf
 
-If you run the above echo **$PGDATA** command and the output is **/pgdata/17/data**  we are good to go.
+Add the following to the file
+
+    listen_addresses = '*'
+    
+    wal_level = 'logical'
+    max_wal_size = 1GB
+    wal_log_hints = on
+    
+    max_connections = 250
+    hot_standby = on
+    password_encryption = md5
+    
+    logging_collector = on
+    log_filename = 'postgresql-%a.log'
+    log_directory = log
+    log_line_prefix = '%m [%r] [%p]: [%l-1] user=%u,db=%d,host=%h '
+    log_checkpoints = on
+    log_truncate_on_rotation = on
+    log_lock_waits = on
+    log_min_duration_statement = 500
+    log_temp_files = 0
+    log_autovacuum_min_duration = 0
+    checkpoint_completion_target = 0.9
+
+Save your changes.
+
+The above config represents minimal configuration. You will need to adjust the runtime parameters to meet your specific needs.
+
+Now modify the postgresql.conf file
+
+    vi postgresql.conf
+
+Add the following to the end of the file.
+
+    include = 'pg_custom.conf'
+
+Save your changes
+
+Modify the **pg_hba.conf** file
+
+    vi pg_hba.conf
+
+Find and references to **scram-sha-256** or **trust**  and change them to md5.
+
+The file should look like the this.
+
+    local   all             postgres                                peer
+
+    # TYPE  DATABASE        USER            ADDRESS                 METHOD
+
+    # "local" is for Unix domain socket connections only
+    local   all             all                                     peer
+
+
+    # IPv4 local connections:
+    host    all             all             127.0.0.1/32            md5
+    host    all             all             0.0.0.0/0               md5
+
+    # IPv6 local connections:
+    host    all             all             ::1/128                 md5
+
+
+    # Allow replication connections from localhost, by a user with the
+    # replication privilege.
+    local   replication     all                                     peer
+    host    replication     all             127.0.0.1/32            md5
+    host    replication     all             ::1/128                 md5
+    host    replication     all             0.0.0.0/0               md5
+
+
+
+Start postgres
 
     pg_ctl start
 
@@ -87,14 +227,27 @@ Start a psql session on **pg1**
 
     postgres=#
 
+Validate you are using md5 encryption.
 
-**Create the following roles**
+    postgres=# show password_encryption;
+     password_encryption
+    ---------------------
+     md5
+    (1 row)
+
+**
+Create the following roles**
 
     create role pgpool with login password 'pgpool';
     create role reader with login password 'reader';
     create role writer with login password 'writer';
     create role foobar with login password 'foobar';
     create role replicator with replication login password 'replicator';
+
+Now set the postgres password
+
+    alter role postgres with password 'postgres';
+
 
 
 Pgpool needs the extension **pgpool_recovery** created in the template1 database in order to run certain commands against the database.
@@ -118,7 +271,8 @@ Validate the extension was created.
     (2 rows)
 
 
-### 4. Prepare the Pgpool server
+
+### 4. Prepare the Pgpool server (pgpool)
 
 As previously discussed, we'll now shift our focus to the dedicated Pgpool server. This machine will serve as the central point for managing our Postgres cluster's connections and traffic. The next steps involve configuring this server to enable its core functionalities and its command line tools.
 
@@ -154,14 +308,9 @@ PCP uses its own, independent authentication mechanism defined in Pgpool's confi
 
 ### Setting up PCP
 
+### Log on to the pgpool server (pgpool)
 
-#### pcp.conf
-
-### Open up another terminal session and log on to the docker container.
-
-    docker exec -it pgpool /bin/bash
-
-sudo to postgres
+#### The pcp.conf file
 
     su - postgres
 
@@ -195,7 +344,7 @@ Save the file and make sure the permissions are set to 600
 
     chmod 600 pcp.conf
 
-#### .pcppass
+#### The .pcppass file
 
 The **`.pcppass`** file is an optional, client side file used to store the credentials for connecting to the Pgpool instance using the PCP tools. Instead of typing the password every time you run a command, the tool can read it from this file.
 
@@ -225,73 +374,46 @@ Port 9898 is the port that pcp is listening on.
 
 It's crucial to remember that the credentials in this file are for logging into and managing **Pgpool** itself, not for connecting to the database.
 
-#### pool_passwd
+#### The pool_passwd file
 
 The pgpool_passwd file is a critical configuration file used by Pgpool to securely store the encrypted passwords for connecting to the backend Postgres database servers. Pgpool uses these credentials to authenticate itself to the primary and replica nodes, which is necessary for core features like replication and failover to function correctly. This file ensures that Pgpool can securely manage its connections to the databases without storing plaintext passwords.
 
-For our install, we are using AES encryption and the pool_passwd file needs to reflect that.
-
-#### .pgpoolkey
-
-The .pgpoolkey file is an optional file used to securely store a password for AES-256 encryption. It's a plain-text file that contains the encryption key, which is used by the pg_enc utility to encrypt and decrypt passwords. Since we are using AES encryption, we will need the .pgpoolkey file for our install.
-
-For security, the **.pgpoolkey** file must be located in the home directory of the user running Pgpool and must have its permissions set to 600.
-
-Since we are running Pgpool under the user postgres the .pgpass must be in the postgres home directory. In our environment, that would be **/var/lib/pgsql**
-
-Assuming you have already su - postgres as mentioned above, run the following commands.
-
-    echo 'jorgeiscool' > ~/.pgpoolkey
-
-Set the permissions
-
-    chmod 600 ~/.pgpoolkey
-
 ### Generate entries for pool_passwd
 
-When you run the following command for each user, you will be prompted for a password, after you enter the password, all the voodo takes place and the entry will be added to the pool_pwasswd file.
-
-For example, you will see a similar output to this.
-
-    pg_enc -m -k ~/.pgpoolkey -u postgres -p
-
-    db password:
-
-    trying to read key from file /var/lib/pgsql/.pgpoolkey
-
-
-Remember to have your .**pgpoolkey** already in place and run the pg_enc command below for each of the users created in the pg1 database.
+When you run the following command for each user, an entry will be added to the pool_pwasswd file for the user
 
 The postgres user
 
-    pg_enc -m -k ~/.pgpoolkey -u postgres -p
+    pg_md5 -m -u postgres postgres
 
 The pgpool user
 
-    pg_enc -m -k ~/.pgpoolkey -u pgpool -p
+    pg_md5 -m -u pgpool pgpool
 
 The reader user
 
-    pg_enc -m -k ~/.pgpoolkey -u reader -p
+    pg_md5 -m -u reader reader
 
 The writer user
 
-    pg_enc -m -k ~/.pgpoolkey -u writer -p
+    pg_md5 -m -u writer writer
 
 And finally the replicator user
 
-    pg_enc -m -k ~/.pgpoolkey -u replicator -p
+    pg_md5 -m -u replicator replicator
+
+If you have additional user you want to add, repeat the above command with the user and password.  In our examples, the password is the last argument of the command.
 
 Based on the role names and password we created earlier  in postgres, this is what our file  **/etc/pgpool-II/pool_passwd** should look like after we generate all the entries.
 
-    postgres:AESFK+C+SsZCGWyT3Ms4q1MOg==
-    pgpool:AESQ5bnrN9tu6V2y6NVoE1Pwg==
-    reader:AESKo9PIJYuOa9kA/hClNKnUg==
-    writer:AES1xhIjMkStiINppUoRE4mPA==
-    replicator:AEStWQQrGkATgObEU1EymwlRQ==
+    postgres:md53175bce1d3201d16594cebf9d7eb3f9d
+    pgpool:md5f24aeb1c3b7d05d7eaf2cd648c307092
+    reader:md5594a23d93fbef31193790edc87763969
+    writer:md5b462494acb3894fee8e680bb0057d319
+    replicator:md55577127b7ffb431f05a1dcd318438d11
 
 
-#### .pgpass
+#### The .pgpass file
 
 The .**pgpass** file is a file used by Postgres client applications, including tools like psql and pg_basebackup, to store passwords for connecting to a Postgres database. It works with Pgpool by providing the password needed to connect to the backend database nodes.
 
@@ -340,12 +462,9 @@ Copy the new .pgpass file to all the database servers we created, pg1, pg2, pg3 
     scp .pgpass pg1:/var/lib/pgsql/
     scp .pgpass pg2:/var/lib/pgsql/
     scp .pgpass pg3:/var/lib/pgsql/
-    scp .pgpass pg4:/var/lib/pgsql/
+ 
 
-
-
-
-#### pgpool.conf
+#### The pgpool.conf file 
 
 Now lets turn our focus to the **pgpool.conf** file located in **/etc/pgpool-II**
 
@@ -366,20 +485,21 @@ Then
 Replace everything in the current file with the content below
 
     pool_passwd     = '/etc/pgpool-II/pool_passwd'
-
+    auth_type       = 'md5'
+    
     # --- Connection Settings ---
-
+    
     listen_addresses     = '*'
     port                 = 9999
-
+    
     # --- pcp connection Settings ---
-
+    
     pcp_socket_dir       = '/tmp'
     pcp_listen_addresses = '*'
     pcp_port             = 9898
-
+    
     # --- Replication stuff
-
+    
     backend_clustering_mode = 'streaming_replication'
     sr_check_period         = 10
     sr_check_user           = 'replicator'
@@ -387,73 +507,63 @@ Replace everything in the current file with the content below
     follow_primary_command  = '/etc/pgpool-II/follow_primary.sh %d %h %p %D %m %H %M %P %r %R'
     replication_mode        = off  # On means pgpool does the syncing
     master_slave_mode       = on   # On means postgres does the syncing.
-
+    
     # --- Load Balancing and Query Routing ---
-
+    
     load_balance_mode           = on
     reset_query_on_pool_release = on
     replicate_on_reset          = on
-
+    
     # --- Backend Server Configuration ---
-
+    
     backend_hostname0         = 'pg1'
     backend_port0             = 5432
     backend_weight0           = 1
-    backend_data_directory0   = '/pgdata/17/data'
+    backend_data_directory0   = '/var/lib/pgsql/17/data'
     backend_clustering_mode   = 'streaming_replication'
     backend_flag0             = 'ALLOW_TO_FAILOVER'
-    backend_application_name0 = 'pgserver0'
-
+    
     backend_hostname1         = 'pg2'
     backend_port1             = 5432
     backend_weight1           = 1
-    backend_data_directory1   = '/pgdata/17/data'
+    backend_data_directory1   = '/var/lib/pgsql/17/data'
     backend_clustering_mode   = 'streaming_replication'
     backend_flag1             = 'ALLOW_TO_FAILOVER'
-    backend_application_name1 = 'pgserver1'
-
+    
     backend_hostname2         = 'pg3'
     backend_port2             = 5432
     backend_weight2           = 1
-    backend_data_directory2   = '/pgdata/17/data'
+    backend_data_directory2   = '/var/lib/pgsql/17/data'
     backend_clustering_mode   = 'streaming_replication'
     backend_flag2             = 'ALLOW_TO_FAILOVER'
-    backend_application_name2 = 'pgserver2'
-
-    backend_hostname3         = 'pg4'
-    backend_port3             = 5432
-    backend_weight3           = 1
-    backend_data_directory3   = '/pgdata/17/data'
-    backend_clustering_mode   = 'streaming_replication'
-    backend_flag3             = 'ALLOW_TO_FAILOVER'
-    backend_application_name3 = 'pgserver3'
-
+    
     # --- failover and recovery info
-
+    
     online_recovery               = on
     detach_false_primary          = on
     failover_command              = '/etc/pgpool-II/failover.sh %d %h %p %D %m %H %M %P %r %R %N %S'
     recovery_user                 = 'postgres'
-    recovery_password             = ''
+    recovery_password             = 'postgres'
     recovery_1st_stage_command    = 'recovery_1st_stage'
     recovery_timeout              = 60
     client_idle_limit_in_recovery = -1
-
+    
     health_check_user             = 'pgpool'
     health_check_password         = ''
     health_check_database         = ''
     health_check_period           = 5
     health_check_timeout          = 30
     health_check_max_retries      = 5
-
+    
+    
     # --- disable cache
     statement_cache_mode = off
     query_cache_mode = off
-
+    
     # --- logging info
-
+    
     logging_collector = on
-    #log_min_messages = DEBUG1
+    log_min_messages = DEBUG1
     log_destination = 'stderr'
     log_line_prefix = '%m: %a pid %p: '
     log_directory = '/var/log/pgpool_log'
@@ -464,8 +574,23 @@ Replace everything in the current file with the content below
     log_per_node_statement = on
     notice_per_node_statement = on
 
-
 Save the changes
+
+### A special note about the recovery_user and recovery_passwd in pgpool.conf
+
+When you are using md5 authentication with pgpool and postgres, the recovery_user and it's password are in the pgpool.conf file with the password defined in clear text.
+
+    recovery_user                 = 'postgres'
+    recovery_password             = 'postgres'
+
+Under normal circumstances, other users and passwd settings can be left as an empty string '' which will make pgpool check for the password in the pool_passwd file and that password will be stored as an md5 hash in the pgpool_passwd file.
+
+For example
+
+    sr_check_user           = 'replicator'
+    sr_check_password       = ''
+
+However, **if you were using scram-sha-256 authentication**, the password for recovery_passwd can be an empty string.
 
 
 
@@ -584,9 +709,13 @@ Then just use scp
 
 With our changes in place, we should be good to start up now.
 
-From inside the pgpool container as user postgres, start pgpool and set debug mode so we can see more details in the log file.
+We can manually start Pgpool for testing
 
     pgpool -f /etc/pgpool-II/pgpool.conf
+
+Or as root, we can run
+
+    systemctl start pgpool.service
 
 Afterwards, you can cd **/var/log/pgpool** look for the log file and simply tail the file.
 
@@ -927,4 +1056,5 @@ Save the changes and reload the pgpool config
 If all goes well, you will see the following ..
 
     pcp_reload_config -- Command Successful
+
 
