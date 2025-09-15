@@ -38,3 +38,43 @@ This guide is intended as a starting point. Once you have a working setup and a 
 
 Unfortunately, I do not have an image for ARM architecture yet. That is in the works.  If you feel you have time and can modify the Docker file for a **--platform=linux/arm64 rockylinux:9** please feel free to do so and submit a PR.
 
+
+### What is Pgpool ?
+
+Pgpool is a middleware for Postgres that sits between the client and the database server. It provides several key features to enhance a Postgres database's performance, high availability, and scalability. It is not a replacement for Postgres.
+
+Some key benefits of Pgpool include ….
+
+Connection Pooling which is one of the most fundamental features. Instead of creating a new connection for every client request, Pgpool maintains a pool of open connections to the Postgres server. When a new client request comes in, Pgpool can reuse an existing connection from the pool. This significantly reduces the overhead of establishing new connections, which is particularly beneficial for applications with frequent, short lived connections.
+
+Pgpool can manage multiple Postgres servers, including a primary server and one or more replica servers. It can intelligently distribute read queries among the replica servers to spread the load and improve performance. This is known as read write splitting. Write queries are always sent to the primary server to maintain data consistency.
+
+By using a primary and replica setup, Pgpool provides high availability. If the primary server fails, Pgpool can automatically detect the failure and promote a replica to become the new primary.  We will cover this in the tutorial.
+
+Pgpool can also cache the results of frequently executed SELECT queries. If the same query is requested again, it can serve the result directly from its cache instead of executing the query on the database server. This can dramatically improve the response time for read heavy workloads.
+
+Obviously, these are all options which can be left out or included in your implementation.
+
+### Comparing Pgpool to Patroni or Pgbouncer
+
+Pgpool's place in the Postgres community is best understood as a multi featured tool that is more complex than a single purpose utility like PgBouncer, but significantly less complicated to operate than a full fledged cluster manager like Patroni.
+
+This middle ground is what makes it an attractive alternative for many use cases.
+
+#### Pgpool vs Patroni
+
+The core reason Pgpool is a less complicated alternative to Patroni is that it operates as a passive proxy rather than an active cluster manager. While Patroni is a powerful tool for building a robust high availability system, its power comes from a more complex design with more components to manage and worry about.
+
+* Patroni’s entire design relies on a distributed consensus store like etcd or consul. This store is the single source of truth for the cluster's state, tracking which node is the primary and which are the replicas. While this model is highly resilient, it introduces a **significant** layer of operational complexity. You now have a third, critical piece of infrastructure to manage and monitor in addition to your Postgres instances. Pgpool, on the other hand, uses its own internal watchdog process to monitor node health and handle failover, eliminating the need for an external, third party component.
+* Passive vs. Active Control is the most crucial distinction between Pgpool and Patroni. Patroni actively manages the lifecycle of your Postgres instances. It starts and stops them, performs promote commands on replicas, and modifies their configurations based on the state in etcd. It essentially **takes over** the management of your Postgres cluster. Pgpool, on the other hand, is a simple proxy that sits in front of your database servers. It monitors their health and routes queries, but it doesn't control the Postgres processes themselves. It doesn't tell a replica to become a primary unless you configure it to do so. It simply detects that one has become a primary and starts routing traffic to it. This hands off approach makes it much simpler to integrate into existing database environments without rearchitecting your entire system.
+
+#### Pgpool vs PgBouncer
+
+The comparison with PgBouncer is different, as PgBouncer is a more narrowly focused tool.
+
+* PgBouncer is designed to do one thing: connection pooling. It is a lightweight and highly efficient tool for handling a large number of client connections by reusing a smaller pool of connections to the Postgres server.
+* PgBouncer does not offer other features like load balancing, automatic failover, query routing or query caching. Its singular purpose makes it somewhat simple and fast. Pgpool, in contrast, is a multi purpose tool that bundles connection pooling, load balancing, automatic failover, and query caching into a single package.
+
+Because it does more, Pgpool is slightly more complex to configure than PgBouncer, though it provides a more comprehensive set of high availability features with granular control of what features to make use of.
+
+
