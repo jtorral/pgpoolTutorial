@@ -4,21 +4,18 @@
 ## Non docker (bare metal) with md5 authentication
 
 
-This variation of the existing documentation for the pgpool setup and tutorial, is a direct evolution of the previous Docker-based guide, but it's recontextualized for bare metal servers. While the core objective remains the same, installing and setting up Pgpool, this version will replace all container-specific instructions with methods native to the Linux operating system.
+This variation of the existing documentation for the pgpool setup and tutorial, is a direct evolution of the previous Docker based guides, but it's recontextualized for bare metal servers. While the core objective remains the same, installing and setting up Pgpool, this version will replace all container-specific instructions with methods native to the Linux operating system.
 
-The key distinction is the management of the Pgpool process itself. In a Docker environment, the container orchestrator (Docker) handles the process lifecycle, user context, and networking.  On a bare metal server, the operating system's native service manager, **systemd**, is used to control Pgpool. This guide will include the use of systemd to start and stop Pgpool as the **postgres** user.
+The key distinction is the management of the Pgpool process itself. In a Docker environment, the container orchestrator (Docker) handles the process lifecycle, user context, and networking.  On a bare metal server, the operating system's native service manager, **systemd**, is used to control Pgpool. This guide will include the use of systemd, and necessary unit file to start and stop Pgpool as the **postgres** user.
 
 
-### Read this if you are not a patient person
-
-This documentation provides both in depth explanations of key Postgres and Pgpool components and concise, minimal instructions for setting up your environment. If you want to get straight to the point, you can skip the detailed sections and jump directly to the highlighted code blocks
 
 ### Getting started
 
 
-This document provides a technical guide for implementing a highly available and load balanced Postgres system using Pgpool. The primary focus is on deploying Pgpool for **automatic failover** and **load balancing** to enhance database resilience and performance.
+Again, This guide deviates from other documentation in this repository by focusing on a **bare metal** deployment rather than containerized environments like Docker. The instructions are tailored for servers running **Rocky Linux 9**, a derivative of Red Hat Enterprise Linux 9, and are intended for direct installation on the host operating system. If you are using a different OS, you may need to modify a few of the steps.
 
-This guide deviates from other documentation in this repository by focusing on a **bare metal** deployment rather than containerized environments like Docker. The instructions are tailored for servers running **Rocky Linux 9**, a derivative of Red Hat Enterprise Linux 9, and are intended for direct installation on the host operating system.
+Additionally, this documentation references Postgres 17. If you are using an older version, please make note of any references to Postgres 17 and adjust as needed for your deployment.
 
 ### Prerequisites and Assumptions
 
@@ -33,19 +30,21 @@ The following technical prerequisites are assumed for the target audience of thi
 -   **SELinux Configuration:** The Security-Enhanced Linux (SELinux) policy is configured to not interfere with the operation of Pgpool and the Postgres services. Especially ssh.
     
 -   **Firewall Rules:** The host firewall (if runnin) is configured to allow bidirectional network traffic between the four servers essential for this demonstration.
-- 
+
 - **Hostname Resolution:** The **/etc/hosts** file on each server has been updated to include the IP addresses and hostnames of all servers in the environment. This is crucial for enabling seamless hostname based communication among the cluster nodes.
 
-**The 4 servers involved will be pg1, pg2, pg3 and pgpool**
+**The servers for this deployment**
 
-If you decide to use the Docker  version of the this documentation, all of the above is already  preconfigured for you.
+For this deployment, we will be using 4 separate servers. 3 for Postgres databases and 1 for the pgpool service.  The hosts name used for this will be **pg1, pg2, pg3** and **pgpool** 
 
 With these components in place, we can proceed with the installation and configuration steps.
 
 
 
 
-### Installing Postgres and Pgpool on all servers
+### Install Postgres and Pgpool on all servers
+
+Although Pgpool is not required to reside on the database server, the database does need a specific Pgpool extension. I have found it convenient to just install Pgpool on the database servers and create the extension with the added bonus of being able to use the database servers for Pgpool as well in a redundant Pgpool deployment using watchdog.
 
 As root, on all servers (**pg1, pg2, pg3 and pgpool** ) run the following.
 
@@ -56,28 +55,58 @@ As root, on all servers (**pg1, pg2, pg3 and pgpool** ) run the following.
     dnf install -y postgresql17-server
     dnf install -y postgresql17-contrib
     dnf install -y https://www.pgpool.net/yum/rpms/4.6/redhat/rhel-9-x86_64/pgpool-II-release-4.6-1.noarch.rpm
-    dnf install -y pgpool-II-pg17
-    dnf install -y pgpool-II-pg17-extensions
-
-**If you get the error, "nothing provides libmemcached.so.11()(64bit)" when trying to install Pgpool ... ,  you will probably need to do the following ...**
-
     dnf config-manager --set-enabled crb
-    dnf install libmemcached-awesome
+    dnf install -y libmemcached-awesome
+    dnf install -y pgpool-II-pg17
+    dnf install -y pgpool-II-pg17-extensions
+
+**Note**
+
+**If you are running Oracle 9 and you received the error, "nothing provides libmemcached.so.11()(64bit)" when trying to install Pgpool ... ,  you will probably need to do the following ...** 
+
+Remember, the above instructions are based on **Rocky 9 OS**. 
+
+The following is a light variation from the above references to **libmemcached** and **crb** to help resolve the issue. Simply run ...
+
+    dnf config-manager --set-enabled ol9_codeready_builder
+    dnf config-manager --set-enabled crb
+    dnf install libmemcached-awesome libmemcached-awesome-devel
+
+Then try to reinstall Pgpool.
+
     dnf install -y pgpool-II-pg17
     dnf install -y pgpool-II-pg17-extensions
 
 
-The error  indicates that a dependency is missing. Specifically, the package requires the **libmemcached.so.11** shared library, but your system can't find it in the enabled repositories. This is a common issue on RHEL-based systems like RHEL 9 when a package from one repository depends on a library that is in a different, un-enabled repository.
+The error  indicates that a dependency is missing.  Specifically, the package requires the **libmemcached.so.11** shared library, but your system can't find it in the enabled repositories. This is a common issue on RHEL-based systems like RHEL 9 when a package from one repository depends on a library that is in a different, un-enabled repository.
 
-#### Make sure the /etc/hosts file is updated with info for all servers (**pg1, pg2, pg3 and pgpool** ).
+#### Reminder, Make sure the /etc/hosts file is updated with info for all servers (pg1, pg2, pg3 and pgpool).
 
 #### Setup ssh for the postgres user across all servers
 
 For this documentation, I simply generate an ssh key ( id_rsa) , add the public key (id_rsa.pub) to the (authorized_keys) file and copy them to the postgres users .ssh directory on all the servers.  This is not the most secure way of doing things but it makes things easier for this documentation.  As mentioned earlier, the assumption is made that you will take care of this as part of the install.
 
-### On the pgpool server (pgpool)
+#### On the pgpool server (pgpool)
 
 #### Setup a unit file for pgpool
+
+If your install did not create the unit file for Pgpool, you will need to create it manually.  A quick way to see if the service is there is to run
+
+    systemctl status pgpool.service
+
+If you see see an output similar to the following, you are good to go.
+
+  
+    ○ pgpool.service - Pgpool-II
+         Loaded: loaded (/usr/lib/systemd/system/pgpool.service; disabled; preset: disabled)
+         Active: inactive (dead)
+
+
+**If you get an error indicating the unit could not be found** 
+
+    Unit pgpool.service could not be found.
+
+Then perform the following steps
 
 As user root
 
@@ -107,6 +136,8 @@ Now reload the daemon
 
     systemctl daemon-reload
 
+**Perform the following regardless of whether you created the unit file or not.** 
+
 One more thing ... 
 
     cp /usr/lib/tmpfiles.d/pgpool-II-pg17.conf /etc/tmpfiles.d
@@ -120,14 +151,10 @@ Now, lets set proper ownership where needed.
     chown -R postgres:postgres pgpool
 
 
-
-
-
-
 ### 3. Prepare the Postgres servers
 
 
-### On the pg1 database server (pg1)
+#### On the pg1 database server (pg1) 
 
 
 At this point Postgres should already be installed on all the servers.
@@ -213,7 +240,7 @@ The file should look like the this.
 
 
 
-Start postgres
+**Start postgres**
 
     pg_ctl start
 
@@ -276,7 +303,7 @@ Validate the extension was created.
 
 As previously discussed, we'll now shift our focus to the dedicated Pgpool server. This machine will serve as the central point for managing our Postgres cluster's connections and traffic. The next steps involve configuring this server to enable its core functionalities and its command line tools.
 
-**A rant about authentication in Pgpool.**
+### I need to say a few things about Pgpool and authentication.
 
 Authentication in Pgpool can be a frustrating puzzle, a testament to its evolution rather than a cohesive design. It's a journey where you feel like you're learning a new secret handshake for every door you want to open.
 
@@ -308,7 +335,7 @@ PCP uses its own, independent authentication mechanism defined in Pgpool's confi
 
 ### Setting up PCP
 
-### Log on to the pgpool server (pgpool)
+#### Log on to the pgpool server (pgpool)
 
 #### The pcp.conf file
 
@@ -380,7 +407,15 @@ The pgpool_passwd file is a critical configuration file used by Pgpool to secure
 
 ### Generate entries for pool_passwd
 
-When you run the following command for each user, an entry will be added to the pool_pwasswd file for the user
+When you run the following command for each user, an entry will be added to the **pool_passwd** file for the users.
+
+**TIP:**
+
+**If you are using md5 as in this documentation and have many users to add to the pool_passwd file, you could run the following query against your Postgres database which will generate the necessary output which you can cut and paste. Thus, saving you the time of generating a password for each user.**
+
+    select usename || ':' ||  passwd from pg_shadow;
+
+Otherwise, here is how it is performed using the pg_md5 tool.
 
 The postgres user
 
@@ -404,7 +439,7 @@ And finally the replicator user
 
 If you have additional user you want to add, repeat the above command with the user and password.  In our examples, the password is the last argument of the command.
 
-Based on the role names and password we created earlier  in postgres, this is what our file  **/etc/pgpool-II/pool_passwd** should look like after we generate all the entries.
+Based on the role names and password we created earlier  in Postgres, this is what our file  **/etc/pgpool-II/pool_passwd** should look like after we generate all the entries.
 
     postgres:md53175bce1d3201d16594cebf9d7eb3f9d
     pgpool:md5f24aeb1c3b7d05d7eaf2cd648c307092
@@ -707,7 +742,7 @@ Then just use scp
 
 ### 6. Ready to start up
 
-With our changes in place, we should be good to start up now.
+With our changes in place, we should be good to start up Pgpool now.
 
 We can manually start Pgpool for testing
 
@@ -1056,5 +1091,7 @@ Save the changes and reload the pgpool config
 If all goes well, you will see the following ..
 
     pcp_reload_config -- Command Successful
+
+
 
 
