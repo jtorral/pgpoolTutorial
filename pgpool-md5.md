@@ -3,23 +3,24 @@
 ## Using md5 authentication
 
 
-### Read this if you are not a patient person
 
-This documentation provides both in depth explanations of key Postgres and Pgpool components and concise, minimal instructions for setting up your environment. If you want to get straight to the point, you can skip the detailed sections and jump directly to the highlighted code blocks
+
+This documentation provides a comprehensive, step by step guide for implementing a secure and reliable PostgreSQL database system that utilizes MD5 authentication in conjunction with Pgpool-II. The setup emphasizes load balancing, automatic failover, and secure client connections.
+
+Please note that while this guide offers detailed instructions for deployment, it does not include finely tuned parameters tailored to specific use cases or performance requirements. You should consider customizing configuration settings to best suit your particular environment and workload.
+
+To streamline the deployment process, a custom Docker environment has been developed. It includes PostgreSQL 17 along with a selection of industry-standard tools to facilitate database management and configuration. The Docker images and configuration files can be obtained directly from the following Git repository:
+
+**https://github.com/jtorral/Pg17Rocky9Pgpool**
 
 ### Getting started
 
-The process outlined in this documentation will guide you through the implementation of a robust Postgres database system utilizing Pgpool for both load balancing and automatic failover.
-
-To simplify the setup outlined here, I have created a custom Docker environment that comes pre packaged with Postgres 17 and many of the industry standard tools used with Postgres. The Docker files to create your local docker image can be downloaded directly from the following Git repository at
-
-**https://github.com/jtorral/rocky9-pg17-bundle.**
 
 ### 1. Build the Docker image
 
-To create the Docker image, clone the repository from the provided GitHub link and run the docker build command. This command builds an image tagged as **rocky9-pg17-bundle** from the Dockerfile in the local directory.
+To create the Docker image, clone the repository from the provided GitHub link and run the docker build command. This command builds an image tagged as **rocky9-pg17-pgpool** from the Dockerfile in the local directory.
 
-    docker build -t rocky9-pg17-bundle .
+    docker build -t rocky9_pg17_pgpool .
 
 ### 2. Create the containers
 
@@ -32,20 +33,20 @@ First, create a network for the containers.
 
 Now, create the 4 postgres containers
 
-    docker run -p 6431:5432 --env=PGPASSWORD=postgres -v pg1-pgdata:/pgdata --hostname pg1 --network=pgnet --name=pg1 -dt rocky9-pg17-bundle
+    docker run -p 6431:5432 --env=PGPASSWORD=postgres -v pg1-pgdata:/pgdata --hostname pg1 --network=pgnet --name=pg1 -dt rocky9_pg17_pgpool
 
-    docker run -p 6432:5432 --env=PGPASSWORD=postgres -v pg2-pgdata:/pgdata --hostname pg2 --network=pgnet --name=pg2 -dt rocky9-pg17-bundle
+    docker run -p 6432:5432 --env=PGPASSWORD=postgres -v pg2-pgdata:/pgdata --hostname pg2 --network=pgnet --name=pg2 -dt rocky9_pg17_pgpool
 
-    docker run -p 6433:5432 --env=PGPASSWORD=postgres -v pg3-pgdata:/pgdata --hostname pg3 --network=pgnet --name=pg3 -dt rocky9-pg17-bundle
+    docker run -p 6433:5432 --env=PGPASSWORD=postgres -v pg3-pgdata:/pgdata --hostname pg3 --network=pgnet --name=pg3 -dt rocky9_pg17_pgpool
 
-    docker run -p 6434:5432 --env=PGPASSWORD=postgres -v pg4-pgdata:/pgdata --hostname pg4 --network=pgnet --name=pg4 -dt rocky9-pg17-bundle
+    docker run -p 6434:5432 --env=PGPASSWORD=postgres -v pg4-pgdata:/pgdata --hostname pg4 --network=pgnet --name=pg4 -dt rocky9_pg17_pgpool
 
 
 
 
 **Lastly, create the pgpool container**
 
-    docker run -p 7432:5432 -p 9999:9999 -p 9898:9898 --env=PGPASSWORD=postgres -v pgpool-pgdata:/pgdata --hostname pgpool  --network=pgnet --name=pgpool -dt rocky9-pg17-bundle
+    docker run -p 7432:5432 -p 9999:9999 -p 9898:9898 --env=PGPASSWORD=postgres -v pgpool-pgdata:/pgdata --hostname pgpool  --network=pgnet --name=pgpool -dt rocky9_pg17_pgpool
 
 Just like in the Postgres containers, we map specific ports that Pgpool uses, specifically, 9898 and 9999. We will get into more details about this later.
 
@@ -65,7 +66,7 @@ Then su to postgres
 
     su - postgres
 
-Modify the postgresql.conf file.  
+Modify the postgresql.conf file.
 
 In this document and setup we use the file **pg_custom.conf** for our postgres customization instead of the postgresql.conf. We simply just include it at the end of postgresql.conf. It makes keeping track of changes really easy.
 
@@ -112,9 +113,11 @@ Create the following roles**
     create role pgpool with login password 'pgpool';
     create role reader with login password 'reader';
     create role writer with login password 'writer';
-    create role foobar with login password 'foobar';
     create role replicator with replication login password 'replicator';
 
+Set the postgres password so it is encrypted in md5. Originally, the containers were using **scram-sha-256** encryption.
+
+    alter role postgres with password 'postgres';
 
 Pgpool needs the extension **pgpool_recovery** created in the template1 database in order to run certain commands against the database.
 
@@ -147,21 +150,21 @@ Find and references to scram-sha-256 and change them to md5.
 The file should look like the this.
 
     local   all             postgres                                peer
-    
+
     # TYPE  DATABASE        USER            ADDRESS                 METHOD
-    
+
     # "local" is for Unix domain socket connections only
     local   all             all                                     peer
-    
-    
+
+
     # IPv4 local connections:
     host    all             all             127.0.0.1/32            md5
     host    all             all             0.0.0.0/0               md5
-    
+
     # IPv6 local connections:
     host    all             all             ::1/128                 md5
-    
-    
+
+
     # Allow replication connections from localhost, by a user with the
     # replication privilege.
     local   replication     all                                     peer
@@ -395,20 +398,20 @@ Replace everything in the current file with the content below
 
     pool_passwd     = '/etc/pgpool-II/pool_passwd'
     auth_type       = 'md5'
-    
+
     # --- Connection Settings ---
-    
+
     listen_addresses     = '*'
     port                 = 9999
-    
+
     # --- pcp connection Settings ---
-    
+
     pcp_socket_dir       = '/tmp'
     pcp_listen_addresses = '*'
     pcp_port             = 9898
-    
+
     # --- Replication stuff
-    
+
     backend_clustering_mode = 'streaming_replication'
     sr_check_period         = 10
     sr_check_user           = 'replicator'
@@ -416,15 +419,15 @@ Replace everything in the current file with the content below
     follow_primary_command  = '/etc/pgpool-II/follow_primary.sh %d %h %p %D %m %H %M %P %r %R'
     replication_mode        = off  # On means pgpool does the syncing
     master_slave_mode       = on   # On means postgres does the syncing.
-    
+
     # --- Load Balancing and Query Routing ---
-    
+
     load_balance_mode           = on
     reset_query_on_pool_release = on
     replicate_on_reset          = on
-    
+
     # --- Backend Server Configuration ---
-    
+
     backend_hostname0         = 'pg1'
     backend_port0             = 5432
     backend_weight0           = 1
@@ -432,7 +435,7 @@ Replace everything in the current file with the content below
     backend_clustering_mode   = 'streaming_replication'
     backend_flag0             = 'ALLOW_TO_FAILOVER'
     backend_application_name0 = 'pgserver0'
-    
+
     backend_hostname1         = 'pg2'
     backend_port1             = 5432
     backend_weight1           = 1
@@ -440,7 +443,7 @@ Replace everything in the current file with the content below
     backend_clustering_mode   = 'streaming_replication'
     backend_flag1             = 'ALLOW_TO_FAILOVER'
     backend_application_name1 = 'pgserver1'
-    
+
     backend_hostname2         = 'pg3'
     backend_port2             = 5432
     backend_weight2           = 1
@@ -448,7 +451,7 @@ Replace everything in the current file with the content below
     backend_clustering_mode   = 'streaming_replication'
     backend_flag2             = 'ALLOW_TO_FAILOVER'
     backend_application_name2 = 'pgserver2'
-    
+
     backend_hostname3         = 'pg4'
     backend_port3             = 5432
     backend_weight3           = 1
@@ -456,9 +459,9 @@ Replace everything in the current file with the content below
     backend_clustering_mode   = 'streaming_replication'
     backend_flag3             = 'ALLOW_TO_FAILOVER'
     backend_application_name3 = 'pgserver3'
-    
+
     # --- failover and recovery info
-    
+
     online_recovery               = on
     detach_false_primary          = on
     failover_command              = '/etc/pgpool-II/failover.sh %d %h %p %D %m %H %M %P %r %R %N %S'
@@ -467,21 +470,21 @@ Replace everything in the current file with the content below
     recovery_1st_stage_command    = 'recovery_1st_stage'
     recovery_timeout              = 60
     client_idle_limit_in_recovery = -1
-    
+
     health_check_user             = 'pgpool'
     health_check_password         = ''
     health_check_database         = ''
     health_check_period           = 5
     health_check_timeout          = 30
     health_check_max_retries      = 5
-    
-    
+
+
     # --- disable cache
     statement_cache_mode = off
     query_cache_mode = off
-    
+
     # --- logging info
-    
+
     logging_collector = on
     log_min_messages = DEBUG1
     log_destination = 'stderr'
@@ -973,8 +976,4 @@ Save the changes and reload the pgpool config
 If all goes well, you will see the following ..
 
     pcp_reload_config -- Command Successful
-
-
-
-
 
