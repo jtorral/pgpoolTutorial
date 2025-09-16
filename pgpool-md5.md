@@ -284,10 +284,16 @@ It's crucial to remember that the credentials in this file are for logging into 
 
 The pgpool_passwd file is a critical configuration file used by Pgpool to securely store the encrypted passwords for connecting to the backend Postgres database servers. Pgpool uses these credentials to authenticate itself to the primary and replica nodes, which is necessary for core features like replication and failover to function correctly. This file ensures that Pgpool can securely manage its connections to the databases without storing plaintext passwords.
 
-For our install, we are using AES encryption and the pool_passwd file needs to reflect that.
-
 
 ### Generate entries for pool_passwd
+
+**TIP:**
+
+**If you are using md5 as in this documentation and have many users to add to the pool_passwd file, you could run the following query against your Postgres database which will generate the necessary output which you can cut and paste. Thus, saving you the time of generating a password for each user.**
+
+    select usename || ':' ||  passwd from pg_shadow;
+
+Otherwise, here is how it is performed using the pg_md5 tool.
 
 When you run the following command for each user, an entry will be added to the pool_pwasswd file for the user
 
