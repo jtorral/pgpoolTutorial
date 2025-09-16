@@ -13,7 +13,7 @@ The process outlined in this documentation will guide you through the implementa
 
 To simplify the setup outlined here, I have created a custom Docker environment that comes pre packaged with Postgres 17 and many of the industry standard tools used with Postgres. The Docker files to create your local docker image can be downloaded directly from the following Git repository at
 
-**https://github.com/jtorral/rocky9-pg17-pgpool**
+**https://github.com/jtorral/Pg17Rocky9Pgpool**
 
 ### 1. Build the Docker image
 
