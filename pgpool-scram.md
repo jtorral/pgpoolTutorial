@@ -13,13 +13,13 @@ The process outlined in this documentation will guide you through the implementa
 
 To simplify the setup outlined here, I have created a custom Docker environment that comes pre packaged with Postgres 17 and many of the industry standard tools used with Postgres. The Docker files to create your local docker image can be downloaded directly from the following Git repository at
 
-**https://github.com/jtorral/rocky9-pg17-bundle.**
+**https://github.com/jtorral/rocky9-pg17-pgpool**
 
 ### 1. Build the Docker image
 
-To create the Docker image, clone the repository from the provided GitHub link and run the docker build command. This command builds an image tagged as **rocky9-pg17-bundle** from the Dockerfile in the local directory.
+To create the Docker image, clone the repository from the provided GitHub link and run the docker build command. This command builds an image tagged as **rocky9-pg17-pgpool** from the Dockerfile in the local directory.
 
-    docker build -t rocky9-pg17-bundle .
+    docker build -t rocky9_pg17_pgpool .
 
 ### 2. Create the containers
 
@@ -32,20 +32,20 @@ First, create a network for the containers.
 
 Now, create the 4 postgres containers
 
-    docker run -p 6431:5432 --env=PGPASSWORD=postgres -v pg1-pgdata:/pgdata --hostname pg1 --network=pgnet --name=pg1 -dt rocky9-pg17-bundle
+    docker run -p 6431:5432 --env=PGPASSWORD=postgres -v pg1-pgdata:/pgdata --hostname pg1 --network=pgnet --name=pg1 -dt rocky9_pg17_pgpool
 
-    docker run -p 6432:5432 --env=PGPASSWORD=postgres -v pg2-pgdata:/pgdata --hostname pg2 --network=pgnet --name=pg2 -dt rocky9-pg17-bundle
+    docker run -p 6432:5432 --env=PGPASSWORD=postgres -v pg2-pgdata:/pgdata --hostname pg2 --network=pgnet --name=pg2 -dt rocky9_pg17_pgpool
 
-    docker run -p 6433:5432 --env=PGPASSWORD=postgres -v pg3-pgdata:/pgdata --hostname pg3 --network=pgnet --name=pg3 -dt rocky9-pg17-bundle
+    docker run -p 6433:5432 --env=PGPASSWORD=postgres -v pg3-pgdata:/pgdata --hostname pg3 --network=pgnet --name=pg3 -dt rocky9_pg17_pgpool
 
-    docker run -p 6434:5432 --env=PGPASSWORD=postgres -v pg4-pgdata:/pgdata --hostname pg4 --network=pgnet --name=pg4 -dt rocky9-pg17-bundle
+    docker run -p 6434:5432 --env=PGPASSWORD=postgres -v pg4-pgdata:/pgdata --hostname pg4 --network=pgnet --name=pg4 -dt rocky9_pg17_pgpool
 
 
 
 
 **Lastly, create the pgpool container**
 
-    docker run -p 7432:5432 -p 9999:9999 -p 9898:9898 --env=PGPASSWORD=postgres -v pgpool-pgdata:/pgdata --hostname pgpool  --network=pgnet --name=pgpool -dt rocky9-pg17-bundle
+    docker run -p 7432:5432 -p 9999:9999 -p 9898:9898 --env=PGPASSWORD=postgres -v pgpool-pgdata:/pgdata --hostname pgpool  --network=pgnet --name=pgpool -dt rocky9_pg17_pgpool
 
 Just like in the Postgres containers, we map specific ports that Pgpool uses, specifically, 9898 and 9999. We will get into more details about this later.
 
