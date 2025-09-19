@@ -562,6 +562,14 @@ It's different from the first file you changed. So don’t just cut and paste
 
     sed -i -e '/^primary_conninfo/d' -e '/^primary_slot_name/d' -e '/^recovery_target_timeline/d' ${NODE_PGDATA}/postgresql.auto.conf
 
+
+#### Modify the pgpool_remote_start file in /etc/pgpool-II
+
+Change the following variables in the file to reflect the values shown below:
+
+    SSH_KEY_FILE=id_rsa
+
+
 #### Modify the failover.sh file in /etc/pgpool-II
 
 Change the following variables in the file to reflect the values shown below:
