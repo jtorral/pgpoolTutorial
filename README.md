@@ -12,7 +12,7 @@ Additionally, there is a file for creating the environment on bare metal server 
   
 Due to crucial differences in the authentication configurations, this guide has been divided into two separate, but structurally similar, documents. It is vital that you choose the correct file to avoid configuration errors.  
 
-The most recent addition to this tutorial is the Ultimate guide to Pgpool and Watchdog. This is an often requested guide on how to set up Postgres, Pgpool and Watchdog. 
+
 **[WATCHDOG.md](https://github.com/jtorral/pgpoolTutorial/blob/main/WATCHDOG.md)**: This file is intended for users who are wanting to understand and configure the Watchdog service of Pgpool to manage failovers.  
 
   
