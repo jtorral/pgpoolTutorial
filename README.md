@@ -1,4 +1,4 @@
-<?xml version="1.0" encoding="UTF-8"?> # Pgpool step by step setup guide  
+# Pgpool step by step setup guide  
   
   
 This document provides a detailed training guide for setting up **pgpool-II** to achieve both **load balancing** and **high availability with failover**.  
