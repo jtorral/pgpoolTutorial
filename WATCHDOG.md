@@ -7,7 +7,48 @@
 
 All references to Pgpool in this document refer to Pgpool-II version 4.3 and higher. For the Docker containers used in this tutorial, we use version 4.6.3
 
-  
+
+
+# Table of contents
+- [Note on Docker deployment](#note-on-docker-deployment)
+- [What is Pgpool](#what-is-pgpool)
+- [How the Watchdog delegate IP works](#how-the-watchdog-delegate-ip-works)
+- [What is needed for a failover to occur](#what-is-needed-for-a-failover-to-occur)
+- [Determining what we need for our environment](#determining-what-we-need-for-our-environment)
+- [The simple core rule to remember and understand](#the-simple-core-rule-to-remember-and-understand)
+- [Formula variables explained](#formula-variables-explained)
+- [Building the environment](#building-the-environment)
+- [Deployment customizations](#deployment-customization-options)
+- [Create network](#create-the-network)
+- [Create Postgres containers](#create-the-postgres-containers)
+- [Create Watchdog Witness containers](#create-the-watchdog-witness-containers)
+- [Perform on all container](#perform-on-all-containers)
+- [Prepare postgres](#prepare-the-postgres-server)
+- [Create accounts and extensions](#create-accounts-needed-by-pgpool)
+- [Prepare Pgpool & Watchdog](#prepare-pgpool-and-watchdog)
+- [A rant about Pgpool and Authentication](#a-rant-about-authentication-in-pgpool)
+- [PCP tools](#pcp-tools)
+- [Setting up PCP](#setting-up-pcp)
+- [The .pcppass file](#the-.pcppass-file)
+- [The pool_passwd file](#the-pool_passwd-file)
+- [The .pgpass file](#the-.pgpass-file)
+- [Propegate files](#propegate-the-files-to-the-other-nodes)
+- [Recovery script files](#recovery-script-files)
+- [Recovery script edits (Manual setup option)](#recovery-script-edits)
+- [Central configuration](#ventral-configuration)
+- [The pgpool.conf file](#the-pgpool.conf-file)
+- [Ready to start things up](#ready-to-startup-the-service)
+- [Administrative tasks](#administrative-tasks-and-checks)
+- [The details explained](#the-details-to-understand)
+
+
+
+
+
+
+
+
+
 
 ## Note on Docker deployment
 
@@ -51,7 +92,7 @@ In simple terms, Watchdog manages a cluster of multiple Pgpool instances in an A
 
   
 
-## How the Watchdog delegateIP (VIP) works
+## How the Watchdog delegate IP works
 
   
 
@@ -74,7 +115,7 @@ The Watchdog Virtual IP is a floating IP address that always points to the activ
 
   
 
-## What is needed for a failover to occur.
+## What is needed for a failover to occur
 
   
 
@@ -152,7 +193,7 @@ It’s important not to confuse Postgres node health with Watchdog node votes. O
 
 With that out of the way, lets move on again.
 
-### Our formula variables explained.
+### Formula variables explained
 
 -   ***N*** = The number of Pgpool nodes that also run Postgres (Postgres + Watchdog nodes)
     
@@ -252,7 +293,7 @@ With that out of the way, lets move on again.
   
   
 
-## Building our environment
+## Building the environment
 
   
 
@@ -266,7 +307,7 @@ This tutorial uses Docker containers as the foundation for building out the serv
 
 After you create the docker image from the Docker files in the above repo, you will need to start the containers in a custom network suitable for our deployment. Therefore we typically first create the network.
 
-### Deployment Guide and Customization Options
+### Deployment Customization Options
 
 This guide is designed to **streamline the deployment of your working environment** through extensive preconfiguration.
 
@@ -286,7 +327,7 @@ If you specifically require **MD5 encryption** for your **Postgres** instance, a
 
     –env=MD5=1
 
-### Create the network.
+### Create the network
 
 Typically, Docker creates networks and adds both ipv4 and ipv6 protocols to the network. I have found that with the Docker containers and Pgpool at least in this environment, that only using ipv4 is a better choice.
 
@@ -319,7 +360,7 @@ Having these port mappings allow us to access Postgres inside the container from
 
   
 
-### Create the Watchdog Witness node containers
+### Create the Watchdog Witness containers
 
 Lastly we need the additional 2 Witness nodes to satisfy our quorum
 
@@ -496,7 +537,7 @@ Create the extension in the template1 database
   
   
 
-## Prepare Pgpool and Watchdg.
+## Prepare Pgpool and Watchdg
 
   
 
@@ -771,7 +812,7 @@ Save the changes and set the proper file permissions
 
 Since the same credentials are used across all nodes in this deployment, you can simplify the .pgpass entries by using wildcards (*) for the host, port, and database fields. However, wildcards cannot be used for the username or password, those must be explicitly defined.
 
-## Propagate the files to the other nodes.
+## Propagate the files to the other nodes
 
   
 
