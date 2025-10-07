@@ -693,8 +693,8 @@ Each command appends a new entry to the pool_passwd file in the format **usernam
 
 After running the above commands, your pool_passwd file will contain entries like:
 
-    pgpool:md5f24aeb1c3b7d05d7eaf2cd648c307092  
-    replicator:md55577127b7ffb431f05a1dcd318438d11  
+    pgpool:md5f24aeb1c3b7d05d7eaf2cd648c307092
+    replicator:md55577127b7ffb431f05a1dcd318438d11
     postgres:md53175bce1d3201d16594cebf9d7eb3f9d
 
   
@@ -742,8 +742,8 @@ Create or edit the .pgpass file
 
 Add the following entries.
 
-    *:*:*:postgres:postgres  
-    *:*:*:replicator:replicator  
+    *:*:*:postgres:postgres
+    *:*:*:replicator:replicator
     *:*:*:pgpool:pgpool
 
 **Important. Make sure there are no spaces when you copy and paste.**
@@ -1109,7 +1109,37 @@ When pg2 is up and running, start pg3
 
     pcp_recovery_node -U pcpadmin -h localhost -n 2
 
-  
+
+## Administrative tasks and checks
+
+### Identify the active node
+
+Now that everything has been deployed, one thing that comes to mind.
+We have an environment with 5 servers. We know Pgpool is active on one of the 5 servers. But how do we identify which one is the active Pgpool server so we can monitor and view it's log files?
+
+The active Pgpool node is the one that currently owns the **VIP (172.28.0.100)**. That’s the node clients are connecting to. That is the node where we can look at current Pgpool log details.
+
+A simple bash script executed from any of the nodes is all it takes.
+
+    for  host in  pg1 pg2 pg3 wd1 wd2; do  
+       echo  "Checking $host..."  
+       ssh $host  "ip a | grep 172.28.0.100 && echo 'ACTIVE NODE: $host'"  
+    done
+
+This will output the following:
+
+    Checking pg1...  
+    Checking pg2...  
+    inet 172.28.0.100/24 scope global eth0  
+    ACTIVE NODE: pg2  
+    Checking pg3...  
+    Checking wd1...  
+    Checking wd2...
+
+And, as you can see above, **pg2** is the active node.
+
+
+
 
 ### View the current status of the database cluster
 
@@ -1141,6 +1171,173 @@ pcp_watchdog_info -U pcpadmin -h localhost | column -t
 
 
 
+### Applying config changes
+
+When you make chnages to th econfig file, sometimes a simple reload is all that is needed load the changes.
+
+    pcp_reload_config -h localhost -U pcpadmin
+
+If you made the changes and propagated the file across the other nodes, you can reload the changes on all other nodes with this simple bash script.
+
+    for host in pg1 pg2 pg3 wd1 wd2; do   
+       echo "Checking $host...";   
+       pcp_reload_config -h $host -U pcpadmin; 
+    done
+
+
+### Pgpool SHOW commands
+
+Have a look at the [Pgpool SHOW documentation](https://www.pgpool.net/docs/latest/en/html/sql-commands.html) for full details.
+
+For reference, a few examples are provided below gathered from our running cluster.
+
+
+#### Some examples
+
+Connect to the VIP with psql on port 9999
+
+    psql -h 172.28.0.100 -U postgres -p 9999
+    
+    psql (17.6)
+    Type "help" for help.
+    
+
+#### SHOW pool_nodes
+
+     node_id | hostname | port | status | pg_status | lb_weight |  role   | pg_role | select_cnt | load_balance_node | replication_delay | replication_state | replication_sync_state | last_status_change  
+    ---------+----------+------+--------+-----------+-----------+---------+---------+------------+-------------------+-------------------+-------------------+------------------------+---------------------
+     0       | pg1      | 5432 | up     | unknown   | 0.333333  | primary | unknown | 11786      | false             | 0                 |                   |                        | 2025-10-06 05:06:32
+     1       | pg2      | 5432 | up     | unknown   | 0.333333  | standby | unknown | 11737      | true              | 0                 |                   |                        | 2025-10-06 05:09:52
+     2       | pg3      | 5432 | up     | unknown   | 0.333333  | standby | unknown | 12023      | false             | 0                 |                   |                        | 2025-10-06 05:09:52
+
+
+#### PGPOOL SHOW backend
+
+
+
+               item            |       value       |                  description                  
+    ---------------------------+-------------------+-----------------------------------------------
+     backend_hostname0         | pg1               | hostname or IP address of PostgreSQL backend.
+     backend_port0             | 5432              | port number of PostgreSQL backend.
+     backend_weight0           | 1                 | load balance weight of backend.
+     backend_data_directory0   | /pgdata/17/data   | data directory of the backend.
+     backend_application_name0 | pg1               | application_name of the backend.
+     backend_flag0             | ALLOW_TO_FAILOVER | Controls various backend behavior.
+     backend_hostname1         | pg2               | hostname or IP address of PostgreSQL backend.
+     backend_port1             | 5432              | port number of PostgreSQL backend.
+     backend_weight1           | 1                 | load balance weight of backend.
+     backend_data_directory1   | /pgdata/17/data   | data directory of the backend.
+     backend_application_name1 | pg2               | application_name of the backend.
+     backend_flag1             | ALLOW_TO_FAILOVER | Controls various backend behavior.
+     backend_hostname2         | pg3               | hostname or IP address of PostgreSQL backend.
+     backend_port2             | 5432              | port number of PostgreSQL backend.
+     backend_weight2           | 1                 | load balance weight of backend.
+     backend_data_directory2   | /pgdata/17/data   | data directory of the backend.
+     backend_application_name2 | pg3               | application_name of the backend.
+     backend_flag2             | ALLOW_TO_FAILOVER | Controls various backend behavior.
+    (18 rows)
+
+
+#### PGPOOL SHOW port
+
+     port 
+    ------
+     9999
+    (1 row)
+
+
+#### PGPOOL SHOW ALL
+
+                        item                    |                             value                              |                                                       description                                                        
+    --------------------------------------------+----------------------------------------------------------------+--------------------------------------------------------------------------------------------------------------------------
+     backend_hostname0                          | pg1                                                            | hostname or IP address of PostgreSQL backend.
+     backend_port0                              | 5432                                                           | port number of PostgreSQL backend.
+     backend_weight0                            | 1                                                              | load balance weight of backend.
+     backend_data_directory0                    | /pgdata/17/data                                                | data directory of the backend.
+     backend_application_name0                  | pg1                                                            | application_name of the backend.
+     backend_flag0                              | ALLOW_TO_FAILOVER                                              | Controls various backend behavior.
+     backend_hostname1                          | pg2                                                            | hostname or IP address of PostgreSQL backend.
+     backend_port1                              | 5432                                                           | port number of PostgreSQL backend.
+     backend_weight1                            | 1                                                              | load balance weight of backend.
+     backend_data_directory1                    | /pgdata/17/data                                                | data directory of the backend.
+     backend_application_name1                  | pg2                                                            | application_name of the backend.
+     backend_flag1                              | ALLOW_TO_FAILOVER                                              | Controls various backend behavior.
+     backend_hostname2                          | pg3                                                            | hostname or IP address of PostgreSQL backend.
+     backend_port2                              | 5432                                                           | port number of PostgreSQL backend.
+     backend_weight2                            | 1                                                              | load balance weight of backend.
+     backend_data_directory2                    | /pgdata/17/data                                                | data directory of the backend.
+    .
+    .
+    .
+
+
+#### PGPOOL SHOW watchdog
+
+         item     | value |                                description                                 
+    --------------+-------+----------------------------------------------------------------------------
+     hostname0    | wd1   | Hostname of pgpool node for watchdog connection.
+     pgpool_port0 | 9999  | tcp/ip pgpool port number of other pgpool node for watchdog connection.
+     wd_port0     | 9000  | tcp/ip watchdog port number of other pgpool node for watchdog connection..
+     hostname1    | wd2   | Hostname of pgpool node for watchdog connection.
+     pgpool_port1 | 9999  | tcp/ip pgpool port number of other pgpool node for watchdog connection.
+     wd_port1     | 9000  | tcp/ip watchdog port number of other pgpool node for watchdog connection..
+     hostname2    | pg1   | Hostname of pgpool node for watchdog connection.
+     pgpool_port2 | 9999  | tcp/ip pgpool port number of other pgpool node for watchdog connection.
+     wd_port2     | 9000  | tcp/ip watchdog port number of other pgpool node for watchdog connection..
+     hostname3    | pg2   | Hostname of pgpool node for watchdog connection.
+     pgpool_port3 | 9999  | tcp/ip pgpool port number of other pgpool node for watchdog connection.
+     wd_port3     | 9000  | tcp/ip watchdog port number of other pgpool node for watchdog connection..
+     hostname4    | pg3   | Hostname of pgpool node for watchdog connection.
+     pgpool_port4 | 9999  | tcp/ip pgpool port number of other pgpool node for watchdog connection.
+     wd_port4     | 9000  | tcp/ip watchdog port number of other pgpool node for watchdog connection..
+    (15 rows)
+
+
+#### PGPOOL SHOW health_check
+
+
+               item            |   value   |                                             description                                              
+    ---------------------------+-----------+------------------------------------------------------------------------------------------------------
+     health_check_period       | 0         | Time interval in seconds between the health checks.
+     health_check_timeout      | 20        | Backend node health check timeout value in seconds.
+     health_check_user         | pgpool    | User name for PostgreSQL backend health check.
+     health_check_password     | *****     | Password for PostgreSQL backend health check database user.
+     health_check_database     | template1 | The database name to be used to perform PostgreSQL backend health check.
+     health_check_max_retries  | 0         | The maximum number of times to retry a failed health check before giving up and initiating failover.
+     health_check_retry_delay  | 1         | The amount of time in seconds to wait between failed health check retries.
+     connect_timeout           | 10000     | Timeout in milliseconds before giving up connecting to backend.
+     health_check_period0      | 0         | Time interval in seconds between the health checks.
+     health_check_timeout0     | 20        | Backend node health check timeout value in seconds.
+     health_check_user0        | pgpool    | User name for PostgreSQL backend health check.
+     health_check_password0    | *****     | Password for PostgreSQL backend health check database user.
+     health_check_database0    | template1 | The database name to be used to perform PostgreSQL backend health check.
+     health_check_max_retries0 | 0         | The maximum number of times to retry a failed health check before giving up and initiating failover.
+     health_check_retry_delay0 | 1         | The amount of time in seconds to wait between failed health check retries.
+     connect_timeout0          | 10000     | Timeout in milliseconds before giving up connecting to backend.
+     health_check_period1      | 0         | Time interval in seconds between the health checks.
+     health_check_timeout1     | 20        | Backend node health check timeout value in seconds.
+     health_check_user1        | pgpool    | User name for PostgreSQL backend health check.
+     health_check_password1    | *****     | Password for PostgreSQL backend health check database user.
+     health_check_database1    | template1 | The database name to be used to perform PostgreSQL backend health check.
+     health_check_max_retries1 | 0         | The maximum number of times to retry a failed health check before giving up and initiating failover.
+     health_check_retry_delay1 | 1         | The amount of time in seconds to wait between failed health check retries.
+     connect_timeout1          | 10000     | Timeout in milliseconds before giving up connecting to backend.
+     health_check_period2      | 0         | Time interval in seconds between the health checks.
+     health_check_timeout2     | 20        | Backend node health check timeout value in seconds.
+     health_check_user2        | pgpool    | User name for PostgreSQL backend health check.
+     health_check_password2    | *****     | Password for PostgreSQL backend health check database user.
+     health_check_database2    | template1 | The database name to be used to perform PostgreSQL backend health check.
+     health_check_max_retries2 | 0         | The maximum number of times to retry a failed health check before giving up and initiating failover.
+     health_check_retry_delay2 | 1         | The amount of time in seconds to wait between failed health check retries.
+     connect_timeout2          | 10000     | Timeout in milliseconds before giving up connecting to backend.
+    (32 rows)
+
+
+
+
+## The details to understand
+
+This section of the documentation is Work in Progress
 
 ### pgpool.conf explanation and REQUIRED action.
 
@@ -1270,5 +1467,7 @@ Additionally, in the pgpool.conf file make sure you specify a complete path for 
     if_up_cmd = '/usr/bin/sudo  /usr/sbin/ip addr add 172.28.0.100/24 dev eth0'  
     if_down_cmd = '/usr/bin/sudo  /usr/sbin/ip addr del 172.28.0.100/24 dev eth0'  
     arping_cmd = '/usr/bin/sudo  /usr/sbin/arping -U 172.28.0.100 -w 1 -I eth0'
+
+
 
 
