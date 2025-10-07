@@ -266,21 +266,7 @@ This tutorial uses Docker containers as the foundation for building out the serv
 
 After you create the docker image from the Docker files in the above repo, you will need to start the containers in a custom network suitable for our deployment. Therefore we typically first create the network.
 
-### Create the network.
-
-Typically, Docker creates networks and adds both ipv4 and ipv6 protocols to the network. I have found that with the Docker containers and Pgpool at least in this environment, that only using ipv4 is a better choice.
-
-The following command should create the network poolnet with ipv6 disabled and a subnet of **172.28.0.0** .
-
-    docker network create --driver bridge --subnet 172.28.0.0/16 --gateway 172.28.0.1 --opt com.docker.network.enable_ipv6=false poolnet
-
-  
-
-### Create the Postgres containers
-
-As already noted above, we will need 3 Postgres containers. We will name these pg1, pg2 and pg3. We will also assign them specific I.P. addresses relative to their name for easy identification.
-
-### Deployment Guide: Customization Options
+### Deployment Guide and Customization Options
 
 This guide is designed to **streamline the deployment of your working environment** through extensive preconfiguration.
 
@@ -300,7 +286,19 @@ If you specifically require **MD5 encryption** for your **Postgres** instance, a
 
     –env=MD5=1
 
-Continuing with the build 
+### Create the network.
+
+Typically, Docker creates networks and adds both ipv4 and ipv6 protocols to the network. I have found that with the Docker containers and Pgpool at least in this environment, that only using ipv4 is a better choice.
+
+The following command should create the network poolnet with ipv6 disabled and a subnet of **172.28.0.0** .
+
+    docker network create --driver bridge --subnet 172.28.0.0/16 --gateway 172.28.0.1 --opt com.docker.network.enable_ipv6=false poolnet
+
+  
+
+### Create the Postgres containers
+
+As already noted above, we will need 3 Postgres containers. We will name these pg1, pg2 and pg3. We will also assign them specific I.P. addresses relative to their name for easy identification.
   
 
 **For pg1**
@@ -339,9 +337,9 @@ Lastly we need the additional 2 Witness nodes to satisfy our quorum
 
   
 
-### Perform on all containers
+### Perform on all containers 
 
-  
+**If containers were built with DONTPRECONFIG option** 
 
 Since the services in this deployment run under the postgres user, and Pgpool’s Watchdog requires the ability to bring the virtual IP up and down from that user context, we need to grant specific OS level privileges to allow this without requiring a password.
 
@@ -387,7 +385,6 @@ With that said, we will be using MD5 authentication in this guide. Some steps ar
   
 
 #### Log onto pg1
-
   
 
     docker exec -it pg1 /bin/bash
@@ -401,26 +398,21 @@ su to postgres
 Side note. In this setup, we use a separate file named pg_custom.conf to manage Postgres specific customizations, rather than modifying postgresql.conf directly. This file is included at the end of postgresql.conf, allowing us to isolate and track changes more easily. This approach simplifies configuration management and makes it easier to maintain consistency across environments.
 
   
-
-Modify the postgresql.conf file.
+If the containers were built **WITHOUT the MD5 option** Modify the pg_custom.conf file.
 
     cd $PGDATA
-
-  
 
 The above cd command should put you in the /pgdata/17/data directory of the container.
 
 Make the modifications to the file pg_custom.conf
 
-    vi pg_custom.conf
-
-  
+    vi pg_custom.conf 
 
 Append the following line to the end of the file then save the changes
 
     password_encryption = md5
 
-Modify the pg_hba.conf file
+if the containers were built **WITHOUT the MD5 option**  Modify the pg_hba.conf file
 
 Find any references to **scram-sha-256** and change them to **md5**. Afterwards, the file should look like the one shown below.
 
@@ -783,7 +775,7 @@ Since the same credentials are used across all nodes in this deployment, you can
 
   
 
-Once the necessary configuration files have been created, you’ll need to distribute them across all nodes in the cluster. Since the Docker containers are preconfigured with SSH keys, you can use scp to securely copy the files to their respective destinations.
+Once the necessary configuration files have been created, you’ll need to distribute them across all nodes in the cluster. Since the Docker containers are pre-configured with SSH keys, you can use scp to securely copy the files to their respective destinations.
 
 Assuming the edits were made on node wd1, execute the following commands:
   
@@ -835,11 +827,12 @@ Assuming the edits were made on node wd1, execute the following commands:
 
 ### Recovery script files
 
-For this Docker based deployment, the recovery scripts (recovery_1st_stage and pgpool_remote_start) have already been pre edited and placed in the appropriate locations. These scripts are tailored to work seamlessly within the containerized environment, so no immediate changes are required to get started.
+For this Docker based deployment, the recovery scripts (recovery_1st_stage and pgpool_remote_start) have already been pre-edited and placed in the appropriate locations. These scripts are tailored to work seamlessly within the containerized environment, so no immediate changes are required to get started.
 
-However, if you're customizing your setup or working outside of this Docker context, we’ll cover how to copy the original scripts from the sample_scripts directory and modify them to suit your environment. That section appears later in this documentation and includes guidance on adapting paths, permissions, and command logic as needed.
+However, if the containers **were built with the DONTPRECONFIG option**, you will need to do this manually. Those steps are further down under the **Recovery script edits** section. 
 
-  
+After editing the files proceed.
+
 
 ### Copy recovery scripts to pg1 only
 
@@ -1355,6 +1348,153 @@ Connect to the VIP with psql on port 9999
 
 
 
+## Recovery script edits
+
+What makes Pgpool such a great tool, is its ability to failover and recover from a failed primary to a standby replica. And this process is in your control.  You can create your own scripts which can be called on a primary down detection or for bringing up an old primary as a new replica. This flexibility gives you so much more control and understanding of the process vs black box fully managed instance by products such as Patroni.
+
+With that said, if you chose to not pre-configure this deployment, we will edit the files manually.
+
+
+On the **wd1** node  which you should still be logged into,  there is the directory **/etc/pgpool-II/sample_scripts** which contains some sample scripts.
+
+Copy the following files to the /etc/pgpool-II directory
+
+    cp /etc/pgpool-II/sample_scripts/recovery_1st_stage.sample /etc/pgpool-II/recovery_1st_stage
+    cp /etc/pgpool-II/sample_scripts/follow_primary.sh.sample /etc/pgpool-II/follow_primary.sh
+    cp /etc/pgpool-II/sample_scripts/failover.sh.sample /etc/pgpool-II/failover.sh
+    cp /etc/pgpool-II/sample_scripts/pgpool_remote_start.sample /etc/pgpool-II/pgpool_remote_start
+
+
+#### Modify the recovery_1st_stage file in /etc/pgpool-II
+
+Find the line near the top of the file
+
+    set -o xtrace
+
+And replace it with the following
+
+    LOGFILE="/var/log/pgpool_log/recovery_1st_stage.$(date +%A.%H:%M:%S).log"  
+    exec  >  >(tee -a "$LOGFILE")  2>&1  
+    set  -o xtrace
+
+Change the following variables in the file to reflect the values shown below:
+
+    REPLUSER=replicator
+
+Remember,  these containers have the ssh keys in them already and they are named id_rsa
+
+    SSH_KEY_FILE=id_rsa
+
+The above reflects the user we created for replication and the ssh key we have already installed as part of the docker container.
+
+Now find the following block
+
+    ${PGHOME}/bin/pg_basebackup -h $PRIMARY_NODE_HOST -U $REPLUSER -p $PRIMARY_NODE_PORT -D $DEST_NODE_PGDATA -X stream
+
+And add **–checkpoint=fast** to it like shown below
+
+    ${PGHOME}/bin/pg_basebackup -h $PRIMARY_NODE_HOST -U $REPLUSER -p $PRIMARY_NODE_PORT -D $DEST_NODE_PGDATA --checkpoint=fast -X stream
+
+This makes sure we do not wait for a checkpoint to take place, we are basically telling it to do a checkpoint at the time of executing the pg_basebackup.
+
+Lastly, look for this block ( line number 56 if not close to it )
+
+
+    cat > ${RECOVERYCONF} << EOT
+    primary_conninfo = 'host=${PRIMARY_NODE_HOST} port=${PRIMARY_NODE_PORT} user=${REPLUSER} application_name=${DEST_NODE_HOST} passfile=''/var/lib/pgsql/.pgpass'''
+    recovery_target_timeline = 'latest'
+    primary_slot_name = '${REPL_SLOT_NAME}'
+    EOT
+
+
+And add the following below it
+
+    # Compensate for postgresql.auto.conf having old connection string by removing entries from postgresql.auto.conf
+
+    sed -i -e '/^primary_conninfo/d' -e '/^primary_slot_name/d' -e '/^recovery_target_timeline/d' ${DEST_NODE_PGDATA}/postgresql.auto.conf
+
+
+The above will address any stale connection string in the  **postgresql.auto.conf** if you setup replication manually without using the pcp tools.
+
+#### Modify the follow_primary.sh file in /etc/pgpool-II
+
+Find the line near the top of the file
+
+    set -o xtrace
+
+And replace it with the following
+
+    LOGFILE="/var/log/pgpool_log/follow_primary.$(date +%A.%H:%M:%S).log"  
+    exec  >  >(tee -a "$LOGFILE")  2>&1  
+    set  -o xtrace
+
+
+Change the following variables in the file to reflect the values shown below:
+
+    REPLUSER=replicator
+
+The user for pcp
+
+    PCP_USER=pcpadmin
+
+And once again the ssh key
+
+    SSH_KEY_FILE=id_rsa
+
+Lastly, look for this block ( line number 142 if not close to it )
+
+
+    cat > ${RECOVERYCONF} << EOT
+    primary_conninfo = 'host=${NEW_PRIMARY_NODE_HOST} port=${NEW_PRIMARY_NODE_PORT} user=${REPLUSER} application_name=${NODE_HOST} passfile=''/var/lib/pgsql/.pgpass'''
+    recovery_target_timeline = 'latest'
+    primary_slot_name = '${REPL_SLOT_NAME}'
+    EOT
+
+
+And add the following block below it.
+
+It's different from the first file you changed. So don’t just cut and paste
+
+
+    # Compensate for postgresql.auto.conf having old connection string by removing entries from postgresql.auto.conf
+
+    sed -i -e '/^primary_conninfo/d' -e '/^primary_slot_name/d' -e '/^recovery_target_timeline/d' ${NODE_PGDATA}/postgresql.auto.conf
+
+#### Modify the pgpool_remote_start file in /etc/pgpool-II
+
+Find the line near the top of the file
+
+    set -o xtrace
+
+And replace it with the following
+
+    LOGFILE="/var/log/pgpool_log/pgpool_remote_start.$(date +%A.%H:%M:%S).log"  
+    exec  >  >(tee -a "$LOGFILE")  2>&1  
+    set  -o xtrace
+
+
+Change the following variables in the file to reflect the values shown below:
+
+    SSH_KEY_FILE=id_rsa
+
+#### Modify the failover.sh file in /etc/pgpool-II
+
+Find the line near the top of the file
+
+    set -o xtrace
+
+And replace it with the following
+
+    LOGFILE="/var/log/pgpool_log/failover.$(date +%A.%H:%M:%S).log"  
+    exec  >  >(tee -a "$LOGFILE")  2>&1  
+    set  -o xtrace
+
+
+Change the following variables in the file to reflect the values shown below:
+
+    SSH_KEY_FILE=id_rsa
+
+
 
 ## The details to understand
 
@@ -1488,6 +1628,7 @@ Additionally, in the pgpool.conf file make sure you specify a complete path for 
     if_up_cmd = '/usr/bin/sudo  /usr/sbin/ip addr add 172.28.0.100/24 dev eth0'  
     if_down_cmd = '/usr/bin/sudo  /usr/sbin/ip addr del 172.28.0.100/24 dev eth0'  
     arping_cmd = '/usr/bin/sudo  /usr/sbin/arping -U 172.28.0.100 -w 1 -I eth0'
+
 
 
 
