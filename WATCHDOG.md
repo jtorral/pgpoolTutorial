@@ -280,6 +280,27 @@ The following command should create the network poolnet with ipv6 disabled and a
 
 As already noted above, we will need 3 Postgres containers. We will name these pg1, pg2 and pg3. We will also assign them specific I.P. addresses relative to their name for easy identification.
 
+### Deployment Guide: Customization Options
+
+This guide is designed to **streamline the deployment of your working environment** through extensive preconfiguration.
+
+While many setup steps have been simplified for efficiency, you have the option to **disable preconfiguration** to better understand the underlying changes.
+
+To disable all preconfiguration and perform a manual setup, append the following environment variable to the `docker run` commands:
+
+    –env=DONTPRECONFIG=1
+
+----------
+
+### Postgres Encryption Customization
+
+By default, the environment is configured to use **SCRAM-SHA-256** for database encryption.
+
+If you specifically require **MD5 encryption** for your **Postgres** instance, as we do in this guide, add the following environment variable to your `docker run` command _in addition to any others_:
+
+    –env=MD5=1
+
+Continuing with the build 
   
 
 **For pg1**
@@ -1467,6 +1488,8 @@ Additionally, in the pgpool.conf file make sure you specify a complete path for 
     if_up_cmd = '/usr/bin/sudo  /usr/sbin/ip addr add 172.28.0.100/24 dev eth0'  
     if_down_cmd = '/usr/bin/sudo  /usr/sbin/ip addr del 172.28.0.100/24 dev eth0'  
     arping_cmd = '/usr/bin/sudo  /usr/sbin/arping -U 172.28.0.100 -w 1 -I eth0'
+
+
 
 
 
