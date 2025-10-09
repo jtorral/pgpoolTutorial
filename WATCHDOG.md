@@ -1132,6 +1132,26 @@ When pg2 is up and running, start pg3
     pcp_recovery_node -U pcpadmin -h localhost -n 2
 
 
+**If you see the following errors** when trying to run the pcp_recovery_node above, 
+
+    pcp_recovery_node -U pcpadmin -h localhost -n 2
+    ERROR:  node recovery failed, node id: 2 is alive
+
+This indicates Pgpool thinks Postgres is up and running.
+
+I am investigating this. but a simple solution is to detach the node, then recovery it.
+
+    pcp_detach_node -U pcpadmin -h localhost -n 2
+    pcp_detach_node -- Command Successful
+
+Now recover it
+
+    pcp_recovery_node -U pcpadmin -h localhost -n 2
+    pcp_recovery_node -- Command Successful
+
+
+
+
 ## Administrative tasks and checks
 
 ### Identify the active node
