@@ -1,5 +1,5 @@
 
-# The ultimate guide to Pgpool with Watchdog
+# The beginners guide to Pgpool with Watchdog
 
 ### Presented by Jorge Torralba
 
