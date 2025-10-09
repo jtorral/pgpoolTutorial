@@ -347,7 +347,7 @@ Lastly we need the additional 2 Witness nodes to satisfy our quorum
 
 ### Perform on all containers 
 
-**If containers were built with DONTPRECONFIG option** 
+**If containers were built with the DONTPRECONFIG option, perform the below edits. Otherwise, skip this section.** 
 
 Since the services in this deployment run under the postgres user, and Pgpool’s Watchdog requires the ability to bring the virtual IP up and down from that user context, we need to grant specific OS level privileges to allow this without requiring a password.
 
@@ -406,7 +406,7 @@ su to postgres
 Side note. In this setup, we use a separate file named pg_custom.conf to manage Postgres specific customizations, rather than modifying postgresql.conf directly. This file is included at the end of postgresql.conf, allowing us to isolate and track changes more easily. This approach simplifies configuration management and makes it easier to maintain consistency across environments.
 
   
-If the containers were built **WITHOUT the MD5 option** Modify the pg_custom.conf file.
+**If the containers were built WITHOUT the MD5 option Modify the pg_custom.conf file. Otherwise, skip this section**
 
     cd $PGDATA
 
@@ -420,7 +420,7 @@ Append the following line to the end of the file then save the changes
 
     password_encryption = md5
 
-if the containers were built **WITHOUT the MD5 option**  Modify the pg_hba.conf file
+**if the containers were built WITHOUT the MD5 option  Modify the pg_hba.conf file. Otherwise, skip this section**
 
 Find any references to **scram-sha-256** and change them to **md5**. Afterwards, the file should look like the one shown below.
 
@@ -1139,9 +1139,7 @@ When pg2 is up and running, start pg3
 
 This indicates Pgpool thinks Postgres is up and running.
 
-This is due to inetrnal check and a wrong status being set for pgpool. It is a common issue that is easily resolved. Simply detach the node before attempting to recover it.
-
-The pcp_recovery_node command has a strict precondition it can only run against a node that is currently marked as down or detached in Pgpool's internal state.
+I am investigating this. but a simple solution is to detach the node, then recovery it.
 
     pcp_detach_node -U pcpadmin -h localhost -n 2
     pcp_detach_node -- Command Successful
