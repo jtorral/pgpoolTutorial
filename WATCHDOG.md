@@ -1140,6 +1140,7 @@ When pg2 is up and running, start pg3
 This indicates Pgpool thinks Postgres is up and running.
 
 This is due to inetrnal check and a wrong status being set for pgpool. It is a common issue that is easily resolved. Simply detach the node before attempting to recover it.
+
 The pcp_recovery_node command has a strict precondition it can only run against a node that is currently marked as down or detached in Pgpool's internal state.
 
     pcp_detach_node -U pcpadmin -h localhost -n 2
