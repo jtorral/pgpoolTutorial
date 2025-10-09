@@ -12,12 +12,12 @@ All references to Pgpool in this document refer to Pgpool-II version 4.3 and hig
 # Table of contents
 - [Note on Docker deployment](#note-on-docker-deployment)
 - [What is Pgpool](#what-is-pgpool)
-- [What is Watchdog](#what-is-watchdog)
 - [How the Watchdog delegate IP works](#how-the-watchdog-delegate-ip-works)
-- [What is needed for a failover](#what-is-needed-for-a-failover-to-occur)
-- [Planning our environment](#determining-what-we-need-for-our-environment)
-- [The simple core rule](#the-simple-core-rule-to-remember-and-understand)
-- [Formula and variables explained](#formula-variables-explained)
+- [What is needed for a failover to occur](#what-is-needed-for-a-failover-to-occur)
+- [Determining what we need for our environment](#determining-what-we-need-for-our-environment)
+- [The simple core rule to remember and understand](#the-simple-core-rule-to-remember-and-understand)
+- [Formula variables explained](#formula-variables-explained)
+- [Bonus quorum calculator](#quorum-calculation-script)
 - [Building the environment](#building-the-environment)
 - [Deployment customizations](#deployment-customization-options)
 - [Create network](#create-the-network)
@@ -36,18 +36,11 @@ All references to Pgpool in this document refer to Pgpool-II version 4.3 and hig
 - [Propegate files](#propegate-the-files-to-the-other-nodes)
 - [Recovery script files](#recovery-script-files)
 - [Recovery script edits (Manual setup option)](#recovery-script-edits)
-- [Central configuration](#central-configuration)
+- [Central configuration](#ventral-configuration)
 - [The pgpool.conf file](#the-pgpool.conf-file)
 - [Ready to start things up](#ready-to-startup-the-service)
 - [Administrative tasks](#administrative-tasks-and-checks)
 - [The details explained](#the-details-to-understand)
-
-
-
-
-
-
-
 
 
 
@@ -159,17 +152,11 @@ Witness nodes are standalone servers used solely for quorum and arbitration, not
 
 Now that we are aware of the requirements based on the objectives noted above, we can move forward.
 
-The variables for our calculations.
-
--   N = 3 ( Postgres nodes )
-    
--   F = 2 ( Failed that can be lost out of N )
-    
-
+### It is critical that you fully understand the concept outlined below. Improper environment configuration could result in a split brain scenario
+ 
 ### The simple core rule to remember and understand
 
   
-
 Pgpool Watchdog uses a quorum based voting system to determine whether the cluster can continue operating after a failure. The key rule is:
 
 The number of healthy Watchdog nodes must be greater than the number of failed Watchdog nodes.
@@ -177,7 +164,6 @@ The number of healthy Watchdog nodes must be greater than the number of failed W
 This ensures that any decisions such as failover or continued operation are made by a majority of active participants.
 
   
-
 **For example,**
 
 In this tutorial our cluster has 5 Watchdog nodes. How we determined 5 is detailed a little further shown below. If 2 of the Watchdog nodes fail (F), we still have 3 healthy Watchdog nodes which is a majority, so the cluster remains operational.
@@ -190,109 +176,89 @@ However, if we only had 3 Watchdog nodes and 2 failed, the remaining single node
 
 It’s important not to confuse Postgres node health with Watchdog node votes. Only Watchdog participants contribute to quorum decisions. Generally speaking, Postgres nodes that do not run Watchdog do not vote. But since our deployment runs Watchdog on the Postgres nodes, they are part of the entire Watchdog cluster.
 
-  
+This procedure describes how to determine the minimum total number of voting nodes required to withstand a specific number of failures and then calculates how many witness nodes (W) must be added to the existing Postgres nodes (N).
 
-With that out of the way, lets move on again.
 
-### Formula variables explained
+**Defining our requirements**
 
--   ***N*** = The number of Pgpool nodes that also run Postgres (Postgres + Watchdog nodes)
-    
--   ***F*** = The number of Pgpool nodes (with Postgres) that can fail without halting the cluster ( Postgres + Watchdog nodes )
-    
--   ***W*** = Number of additional Watchdog only witness nodes required to maintain quorum. (Watchdog nodes only)
-    
--   ***L*** = Number of Watchdog nodes expected to remain alive after failure. (Remaining Watchdog nodes)
-    
--   ***T*** = Total number of Watchdog nodes in the cluster (All Watchdog nodes)
-    
--   ***Q*** = Minimum number of healthy Watchdog nodes required to maintain quorum. (Watchdog votes needed)
-    
+ - N = Number of Postgres nodes (and Pgpool voting members) 
+ - F  = Number of failures to tolerate
 
-  
-  
-  
+**Core calculations**
 
-### Calculations
+**Calculate total Nodes Required (TR)**
+This is the Minimum total voting nodes needed to tolerate F failures.
 
--   ***N*** = 3
+***TR = (2 * F) + 1***  
+
+
+**Calculate quorum required (Q)** 
+This is the minimum number of nodes that must remain alive for the cluster to function.
+
+This is calculated based on the total *required* nodes.
+
+***Q = (TR / 2) + 1 )***
+
+**Calculate maximum tolerable failures (MF) of the existing N nodes**
+First, find the quorum of the existing N nodes.
+
+ - If N is even (like 2, 4, 6), its quorum is N/2 + 1.  
+ - If N is odd (like 3, 5), its quorum is (N+1)/2.
+
+*Note: Since we are only calculating MF to check if a witness is needed, we'll use a direct comparison with F.*
+
+**Calculate the Witness nodes (W)**
+
+ - W is the difference between the Total Required Nodes (TR) and the
+   existing nodes (N). 
+  - We use '**max(0, ...)**' logic to ensure W is not negative if N is already large enough.
+
+***W_TEMP = (TR - N)***
+
+*Set W to 0 if the existing nodes are already enough, otherwise use the calculated value.*
+
+    Is W_TEMP < 0 ?
     
--   ***F*** = 2
-    
+    Yes - Then W = 0
+    No  - W= W_TEMP
 
-  
+**Final calculations (after witnesses are added)**
 
-### Witness nodes (W).
+Calculate total voting nodes after adding witnesses.
 
--   ***W*** = ceil ( ( 2 x F + 1) - N )
-    
--   ***W*** = ceil ( ( 2 x 2 + 1) - 3 )
-    
--   ​***W*** = 2
-    
+***N_TOTAL = ( N + W )***
 
-  
+Calculate final quorum of the cluster (**Q_FINAL**)
 
-### Total nodes (T).
+***Q_FINAL = ( N_TOTAL / 2) + 1 )*** 
 
--   ***T*** = ( W+N )
-    
--   ***T*** = ( 2 + 3 )
-    
--   ***T*** = 5
-    
+Calculate final max tolerable failures (**MF_FINAL**)
 
-  
+***MF_FINAL = ( N_TOTAL - Q_FINAL )***
 
-### Quorum (Q).
+**The end Results**
 
--   ***Q*** = floor ( T/2 ) + 1
-    
--   ***Q*** = floor ( 5 / 2 ) + 1
-    
--   ***Q***= 3
-    
+- Total Voting Nodes (N+W) = N_TOTAL
+- Final Quorum Required (Q) = Q_FINAL
+- Max Tolerable Failures (MF) =  MF_FINAL
 
-  
+**Are we good to go?**  
 
-### Remaining live nodes (L).
-
--   ***L*** = ( N - F ) + W
+    Is MF_FINAL > F  ?
     
--   ***L*** = ( 3 - 2 ) + 2
-    
--   ***L*** = 3
-    
-
-### Interpretation
-
--   Since **L = 3** and **Q = 3**, the cluster can maintain operation when 2 of the 3 Postgres nodes are down, thanks to the 2 witness nodes.
-    
--   If **L < Q** the cluster would halt to avoid data corruption such as a split brain.
+    Yes - We are good to go
+    No  - We need more Witness nodes
     
 
-  
+ The end result for our deployment of 3 Postgres Nodes tolerating 2 failures
+ - Total Nodes Required (TR = 2F+1): **5**
+ - Witness Nodes Required (W): **2**
+ - Total Voting Nodes (N+W): **5**
+ - Final Quorum Required (Q): **3**
+ - Max Tolerable Failures (MF): **2**
+ - Can we run with failed nodes?  **Yes**
 
-### Make sure you have a clear understanding of the following
-
--   If you start with an odd number of Postgres servers (**3**) you can use an even number of Witness servers including 0 to keep it the total odd.
-    
--   If you start with an even number of Postgres servers (**4**) AND T equates to an even number, you MUST add another Witness to make T odd, ensuring that a majority can be established and preventing ties.
-    
-
-  
-
-### To recap the above
-
--   To tolerate the failure of 2 nodes in a 3 node environment, we need 2 witness nodes.
-    
--   The total cluster would consist of 5 nodes. 3 Postgres nodes and 2 witness nodes.
-    
--   For even numbered Postgres nodes, adding an extra witness node ensures the total **T** becomes odd, preventing tie votes and split brain.
-    
-
-  
-  
+Since **M_FINAL > F** we can have an active cluster
 
 ## Building the environment
 
@@ -1674,6 +1640,49 @@ Additionally, in the pgpool.conf file make sure you specify a complete path for 
 
 
 
+### Quorum calculation script
 
+The following bash script is very basic. Feel free to enhance it if you like. It is intended to provide waht you need for the environment. 
+
+    #!/bin/bash
+    
+    N=$1
+    F=$2
+    
+    TR=$(( (2 * F) + 1 ))
+    
+    Q=$(( (TR / 2) + 1 ))
+    
+    W_TEMP=$(( TR - N ))
+    
+    if [ "$W_TEMP" -le 0 ]; then
+        W=0
+    else
+        W="$W_TEMP"
+    fi
+    
+    N_TOTAL=$(( N + W ))
+    
+    Q_FINAL=$(( (N_TOTAL / 2) + 1 ))
+    
+    MF_FINAL=$(( N_TOTAL - Q_FINAL ))
+    
+    echo "--- Pgpool Quorum Calculation ---"
+    echo
+    echo "Input Values:"
+    echo "  Postgres Nodes (N): $N"
+    echo "  Target Failures (F): $F"
+    echo "------------------------------------"
+    echo
+    echo "Core Calculation:"
+    echo "  Total Nodes Required (TR = 2F+1): $TR"
+    echo "  Witness Nodes Required (W):       $W"
+    echo "------------------------------------"
+    echo
+    echo "Final Cluster State:"
+    echo "  Total Voting Nodes (N+W):      $N_TOTAL"
+    echo "  Final Quorum Required (Q):     $Q_FINAL"
+    echo "  Max Tolerable Failures (MF):   $MF_FINAL"
+    echo "  Can we run with failed nodes?  $([ "$MF_FINAL" -ge "$F" ] && echo "YES" || echo "NO")"
 
 
