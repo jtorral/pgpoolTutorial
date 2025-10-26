@@ -1,0 +1,509 @@
+#!/bin/bash
+
+function usage() {
+cat << EOF
+
+Usage: $(basename "$0") options
+ 
+Description:
+ 
+A for generating docker run files used by images created from the repo this was pulled from.
+The generated run file can be used to manage your deploy. Similar to what you can do with a docker-compose file.
+ 
+Options:
+  -m 			Setup postgres environment to use md5 password_encription."
+  -p <password>		Password for user postgres. If usinmg special characters like #! etc .. escape them with a \ default = \"postgres\""
+  -n <number>		number of of containers to create. Default is 1. "
+ 
+Required Options:
+  -c <name>		The name container/node names to use. This should be a prefix. For example if you want 3 postgres containers"
+     			pg1, pg2 and pg3. Simply provide \"pg\" since this script will know how to name them."
+  -w <network>		The name of the network to bind the containers to. You can provide an existing network name or a new one to create."
+  -s <subnet>		If creating a new network, provide the first 3 octets for the subnet to use with the new network. For example: 192.168.50"
+  -i <image>		docker image to use. If you created your own image tage, set it here."
+
+EOF
+
+exit
+}
+
+
+function createNetwork() {
+echo -e "\tdocker network create \
+--driver bridge \
+--subnet $subnet \
+--gateway $gateway \
+$networkName " >> $dockerRunFile
+}
+
+
+function createNode() {
+echo -e "\tdocker run \
+-p $pgPortMap:5432 \
+-p $poolPortMap:9999 \
+--env=PGPASSWORD=$pgPassword \
+-v ${nodeName}-pgdata:/pgdata \
+--hostname=$nodeName \
+--network=$networkName \
+--name=$nodeName \
+--privileged \
+--ip $nodeIp \
+$md5 \
+-dt $dockerImage " >> $dockerRunFile
+}
+
+
+
+# --- Find any used postgres by docker and get the next availabe for mapping
+function getLastPgPortUsed() {
+   lastPgPortUsed=""
+   lastPgPortUsed=$(docker ps --format "{{.Ports}}" | grep 5432 |  sed -n 's/.*0\.0\.0\.0:\([0-9]*\)->5432\/tcp.*/\1/p' | sort | tail -1);
+}
+
+
+# --- Find any used pgpool ports by docker and get the next availabe for mapping
+function getLastPgPoolPortUsed() {
+   lastPgPoolPortUsed=""
+   lastPgPoolPortUsed=$(docker ps --format "{{.Ports}}" | grep 9999 |  sed -n 's/.*0\.0\.0\.0:\([0-9]*\)->9999\/tcp.*/\1/p' | sort | tail -1);
+}
+
+
+# --- Find last IP used by docker network and subnet. Then use next available ip for the subnet
+function getNetworkDetails() {
+   lastIp=$(docker network inspect $networkName --format '{{range .Containers}}{{.IPv4Address}}{{"\n"}}{{end}}' | awk 'NF' | awk -F "." '{print $4}' | awk -F "/" '{print $1'} | sort | tail -1)
+   lastSub=$(docker network inspect $networkName --format '{{range .Containers}}{{.IPv4Address}}{{"\n"}}{{end}}' | awk 'NF' | awk -F "." '{print $1 "." $2 "." $3 }' | tail -1)
+   nextSubIp=$(( lastIp + 1 ))
+}
+
+
+
+
+# --- Check to see if containers already exist using the name you provided. Only prefix is used. So a contaner name of pg would get pg1,pg2 and pg3 if you specified 3 nodes
+function checkForExistingContainers() {
+   containerNameList=$(docker ps -a --format "{{.Names}}")
+   tempNameList=$(echo "$containerNameList" | tr -d '0-9')
+   containerNameList=$(echo $containerNameList | tr \n " ")
+
+   if [[ "$tempNameList" =~ "$nodeName" ]]; then
+      echo -e
+      echo -e "\t**** ERROR! Container conflict: \"$nodeName\" already exists in the list of docker containers on this host \"$containerNameList\" ****"
+      echo -e
+      exit
+   fi
+}
+
+
+# --- See if the subnet you are wanting to use already exists. If it does, ignore the subnet address passed and use ip from existing subnet
+function checkForExistingSubnet() {
+   subnetList=$(docker network ls -q | xargs docker network inspect --format '{{.Name}}: {{range .IPAM.Config}}{{.Subnet}} {{end}}' | awk -F : '{print $2}' | awk 'NF' | awk -F'.' '{print $1"."$2"."$3}')
+   if [[ "$subnetList" =~ "$sub" ]]; then
+      echo -e
+      echo -e "\t**** ERROR! Subnet conflict: \"$sub\" is already in use for existing networks. For more details, run the command below. ****"
+      echo -e
+      echo -e "\tdocker network ls -q | xargs docker network inspect --format '{{.Name}}: {{range .IPAM.Config}}{{.Subnet}} {{end}}'"
+      echo -e
+      exit
+   fi 
+}
+
+
+# --- Check if the docker image exists
+function checkImageExists() {
+   imageExists=$(docker images | grep -w $dockerImage | wc -l)
+}
+
+
+# --- Check if the network you want is already there
+function checkForExistingNetworks() {
+   networkExists=$(docker network ls | grep -w $networkName | wc -l)
+   return $networkExists
+}
+
+
+
+# --- Validate is numeric
+function isNumeric() {
+   num=$1
+   var=$2
+   valid=0
+   regexp='^[0-9]+$'
+   if ! [[ $num =~ $regexp ]] ; then
+      echo -e
+      echo -e "\t**** ERROR! Invalid format: Only numbers are allowed. You entered \"$num\" for option \"$var\". Please correct and try again ****"
+      echo -e
+      exit
+   fi
+}
+
+
+
+# --- validate its alpha only and lower case
+function isAlpha() {
+   str=$1
+   var=$2
+   valid=0
+   regexp='^[a-z]+$'
+   if ! [[ $str =~ $regexp ]] ; then
+      echo -e
+      echo -e "\t**** ERROR! Invalid format: Only lower case letters are allowed. No special characters. \"$str\" entered for \"$var\". Please correct and try again ****"
+      echo -e
+      exit
+   fi
+}
+  
+
+# --- Check subnet. make sure its valid format and less than 255
+function isSubnet() {
+   local str=$1
+   local var=$2
+   local valid=0
+   # Regex for three octets: nnn.nnn.nnn where nnn is 0–255
+   if [[ "$str" =~ ^([0-9]{1,3})\.([0-9]{1,3})\.([0-9]{1,3})$ ]]; then
+     # Validate each octet is <= 255
+     if (( ${BASH_REMATCH[1]} <= 255 && ${BASH_REMATCH[2]} <= 255 && ${BASH_REMATCH[3]} <= 255 )); then
+        return
+     else
+        echo -e
+        echo -e "\t**** ERROR! Invalid subnet: One or more octet is > 255 \"$str\" entered for \"$var\". Please correct and try again ****"
+        echo -e
+        exit
+     fi
+   else
+     echo -e
+     echo -e "\t****ERROR! Invalid format: \"$str\" entered for \"$var\". Please correct and try again ****"
+     echo -e
+     exit
+   fi
+
+}
+
+
+
+# --- Set some default values
+#dockerImage="rocky9_pg17_pgpool"
+pgPassword="postgres"
+createTheNetwork=0
+numNodes=1
+md5=""
+
+# ---  Here we go ....
+while getopts c:n:s:w:p:i:m name
+do      
+   case $name in
+      c) nodeName="$OPTARG";;
+      n) numNodes="$OPTARG";; 
+      s) sub="$OPTARG";; 
+      w) networkName="$OPTARG";; 
+      m) md5="--env=MD5=1";; 
+      p) pgPassword="$OPTARG";; 
+      i) dockerImage="$OPTARG";; 
+      *) usage;;
+      ?) usage;;
+   esac 
+done    
+shift $(($OPTIND - 1))
+
+
+# --- Ok, lets go through everything in a procedural way ...
+
+
+# --- need a node name prefix regardlesiss of what we do. So lets make sure we get one
+if [ -z "$nodeName" ]; then
+   usage
+fi
+
+
+# --- need an image. If it becomes a pain, just set a default image 
+if [ -z "$dockerImage" ]; then
+   usage
+fi
+
+
+
+
+# --- check nodename prefix and error message if wrong. Otherwise continue
+# --- Checks will exit if errors found
+isAlpha $nodeName "-c"
+
+# --- Gotta have a newtork name, wheather existing or new
+if [ -z "$networkName" ]; then
+   usage
+fi
+
+# --- check network name and error message if wrong. Otherwise continue
+# --- Checks will exit if errors found
+isAlpha $networkName "-w"
+
+# --- Now lets see if the network provided is existing or not.
+checkForExistingNetworks
+netExists=$?
+
+
+# --- If the network provided is for an exsiting network, we dont't need a subnet since we use the existing. Otherwise
+# --- If the network is new and no subnet is specified, error out saying we need a subnet
+if [[ $netExists -eq 0 && -z "$sub" ]]; then
+   echo -e
+   echo -e "\t**** ERROR! Missing subnet for desired network \"$networkName\" **** "
+   echo -e
+   exit
+fi
+
+
+
+# --- Ok, we are getting a subnet provided, now lets validate format of subnet provided 
+# --- Checks will exit if errors found
+if [[ $netExists -eq 0 && ! -z "$sub" ]]; then
+   isSubnet $sub "-s"
+fi
+
+
+# --- We passed all network and subnet checks so far. Now lets get the subnet and next ip available if
+# --- using an existing subnet. Otherwise start at 10 for new subnet
+
+# --- If an existing network ....
+if [ $networkExists -gt 0 ]; then
+   getNetworkDetails
+   # --- Since we are getting the networkdetails from an existing network, assign lastSub to sub. as if we passed it in when we ran the script with -s 
+   sub=$lastSub
+fi
+
+
+# --- If its a new network lets start with ip of 10. 
+if [ $networkExists -eq 0 ]; then
+   subnet="${sub}.0/24"
+   gateway="${sub}.1"
+   nextSubIp=10
+fi
+
+
+
+# --- Ok, network details Lets get node details now 
+
+# --- lets validate numeric for number of nodes to create. By the way, Default is 1.
+# --- Checks will exit if errors found
+isNumeric $numNodes "-n"
+
+
+# -----------------------------------------------
+# Start creating our script to manage this deploy
+# -----------------------------------------------
+dockerRunFile="DockerRunThis.${nodeName}"
+echo -e "#!/bin/bash\n" > $dockerRunFile
+
+
+# --- Write create network details to the run file
+echo -e "function runNetwork() {" >> $dockerRunFile
+if [ $networkExists -eq 0 ]; then
+   createNetwork
+else
+   echo -e "\techo -e \"Using existing network \"$networkName\" No need to create the network at this time.\" " >> $dockerRunFile
+fi
+echo -e "}\n" >> $dockerRunFile
+
+
+# --- Lets create the containers. We should have everything now defined
+# --- Loop theough numNodes
+
+# --- Lets get an available postgres port to map from existing containers
+getLastPgPortUsed
+
+   
+# --- If a port is found lets increment it by 1 for the next free port 
+# --- Otherwise start with 6431
+# --- Remember, this is for docker portmapping so we can get to postgres from outside the container
+if [ -n "$lastPgPortUsed" ]; then 
+   nextPgPort=$(( lastPgPortUsed + 1 ))
+else
+   nextPgPort="6431"
+fi
+
+
+
+# --- Lets get an available pgpool port to map from existing containers
+getLastPgPoolPortUsed
+
+# --- If a pgpool port is found lets increment it by 1 for the next free port 
+# --- Otherwise start with 9991
+# --- Remember, this is for docker portmapping so we can get to pgpool from outside the container
+if [ -n "$lastPgPoolPortUsed" ]; then
+   nextPgPoolPort=$(( lastPgPoolPortUsed + 1 ))
+else  
+   nextPgPoolPort="9991"
+fi 
+
+
+# A few variable defined to keep track of node names and volume names
+nodeList=""
+volumeList=""
+tempNodeName=$nodeName
+
+echo -e "function runContainers() {" >> $dockerRunFile
+echo -e "\trunNetwork" >> $dockerRunFile
+
+for (( i=1; i<=$numNodes; i++ )); do
+   if [ $networkExists -eq 0 ]; then
+      # ---------------------------------------------------------------------------------------------
+      # Lets start with an IP of 11 for new containers when creating a new network
+      # 1 is reserved for the gateway. 
+      # Note: Our for loop starts with 1, so instead of incrementing the nextIp by 10, we do it by 9.
+      # ---------------------------------------------------------------------------------------------
+      nextIp=$(( i + 9 ))
+   else 
+      # ---------------------------------------------------------------------------------
+      # If using an existing network, we get the last ip on that network and increment it
+      # ---------------------------------------------------------------------------------
+      nextIp=$(( i + lastIp ))
+   fi
+
+   nodeName="${tempNodeName}${i}" 
+   nodeIp="${sub}.${nextIp}"
+   pgPortMap=$(( nextPgPort + $i ))
+   poolPortMap=$(( nextPgPoolPort + $i ))
+   nodeList="${nodeList} ${nodeName}"
+   volumeList="${volumeList}  ${nodeName}-pgdata"
+   createNode
+done
+
+echo -e "}\n" >> $dockerRunFile
+
+
+# ---------------------------------------------------------------------
+# Lets create additional functions to put in the script we are creating
+# ---------------------------------------------------------------------
+
+
+echo -e "function stopContainers() {" >> $dockerRunFile
+echo -e "\techo -e \"Running docker stop $nodeList\" " >> $dockerRunFile
+echo -e "\tdocker stop $nodeList" >> $dockerRunFile
+echo -e "}\n" >> $dockerRunFile
+
+   
+echo -e "function startContainers() {" >> $dockerRunFile
+echo -e "\techo -e \"Running docker start $nodeList\" " >> $dockerRunFile
+echo -e "\tdocker start $nodeList" >> $dockerRunFile
+echo -e "}\n" >> $dockerRunFile
+
+
+echo -e "function removeContainers() {" >> $dockerRunFile
+echo -e "\techo -e \"Running docker rm $nodeList\" " >> $dockerRunFile
+echo -e "\tdocker rm $nodeList" >> $dockerRunFile
+echo -e "}\n" >> $dockerRunFile
+
+# --- If removing a network used by other containers, the docker network rm will not work
+# --- Since other containers are using it
+
+echo -e "function removeNetwork() {" >> $dockerRunFile
+if [ $networkExists -eq 0 ]; then
+   echo -e "\techo -e \"Running docker network rm $networkName\" " >> $dockerRunFile
+   echo -e "\tdocker network rm $networkName" >> $dockerRunFile
+else
+   echo -e "\techo -e \"Cannot remove network which existed prior to this docker deploy\" " >> $dockerRunFile
+fi
+echo -e "}\n" >> $dockerRunFile
+
+
+
+echo -e "function removeVolumes() {" >> $dockerRunFile
+echo -e "\techo -e \"Running docker volume rm $volumeList\" " >> $dockerRunFile
+echo -e "\tdocker volume rm $volumeList" >> $dockerRunFile
+echo -e "}\n" >> $dockerRunFile
+
+
+
+echo -e "function usage() {" >> $dockerRunFile
+
+cat << EOF2 >> $dockerRunFile
+
+cat << EOF
+
+Usage: $dockerRunFile [-f] {start|stop|create|rm|rmvolumes|down}
+      
+Description:
+      
+Manage your docker deploy generated when you ran build-docker-env
+
+Actions:
+  start         Start the docker containers $nodeList
+  stop          Stop the docker containers $nodeList
+  create        Run the docker conatiners "$nodeList" for the first time
+  rm            Remove the docker containers $nodeList
+  rmvolumes     Remove the volumes $volumeList
+  down          Delete everything created with this run file
+   
+Options:
+  -f            Force delete of volumes. Otherwise preserved
+   
+EOF
+EOF2
+
+echo -e "exit" >> $dockerRunFile
+echo -e "}\n" >> $dockerRunFile
+
+
+echo -e "function deleteEnv() {" >> $dockerRunFile
+echo -e "\tstopContainers" >> $dockerRunFile
+echo -e "\tremoveContainers" >> $dockerRunFile
+echo -e "\tremoveNetwork" >> $dockerRunFile
+
+echo -e "\tif [ \$force -eq 1 ]; then" >> $dockerRunFile
+echo -e "\t\tremoveVolumes" >> $dockerRunFile
+echo -e "\tfi" >> $dockerRunFile
+
+echo -e "\tif [ \$force -eq 0 ]; then" >> $dockerRunFile
+echo -e "\t\techo -e \"Preserving volumes. use -f to force remove. Or run $dockerRunFile -a rmvolumes\" " >> $dockerRunFile
+echo -e "\tfi" >> $dockerRunFile
+
+echo -e "}\n" >> $dockerRunFile
+
+
+echo -e "force=0" >> $dockerRunFile
+echo -e "doThis=\"\"" >> $dockerRunFile
+
+echo -e "
+while getopts a:f name
+do
+   case \$name in
+      a) doThis=\"\$OPTARG\";;
+      f) force=1;;
+      *) usage;;
+      ?) usage;;
+   esac
+done
+shift \$((\$OPTIND - 1))
+\n" >> $dockerRunFile
+
+
+echo -e "
+case \$doThis in        
+   \"start\") startContainers;;  
+   \"stop\") stopContainers;;  
+   \"create\") runContainers;;  
+   \"rm\") removeContainers;;
+   \"rmvolumes\") removeVolumes;;
+   \"down\") deleteEnv;;
+   *) usage;;
+   ?) usage;;
+esac
+\n" >> $dockerRunFile
+
+
+chmod 700 $dockerRunFile
+
+echo 
+echo -e "\tThe following docker deploy utility manager file: ${dockerRunFile} has been created. To manage your new deploy run the file \"./${dockerRunFile}\""
+echo 
+
+
+# -----------------------------------------------
+# Make sure the docker image you are using exists
+# -----------------------------------------------
+checkImageExists
+
+if [ $imageExists -eq 0 ]; then
+   echo -e
+   echo -e "\t!!!!! IMPORTANT  DO NOT IGNORE THIS !!!!!"
+   echo -e
+   echo -e "\tWARNING! The necessary docker image \"$dockerImage\" does not exist. You will not be able to run the $dockerRunFile utility succesfuly unitil you build the image."
+   echo -e "\tTo do so, run \"docker build -t $dockerImage .\" from within the local folder containing the docker file for the repo."
+   echo -e
+fi
